@@ -9,6 +9,9 @@ import cors from 'cors';
 import { connectDB } from './db';
 import inquiriesRouter from './routes/inquiries';
 import documentsRouter from './routes/documents';
+import extractRouter from './routes/extract';
+import sectionsRouter from './routes/sections';
+import stage3Router   from './routes/stage3';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -18,9 +21,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
 app.use('/api/inquiries', inquiriesRouter);
 app.use('/api/documents', documentsRouter);
+app.use('/api/extract',   extractRouter);
+app.use('/api/sections',  sectionsRouter);
+app.use('/api/stage3',    stage3Router);
 
 // Health check
 app.get('/health', (_req, res) => {

@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import type { Readable } from 'stream';
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION ?? 'ap-south-1',
@@ -25,6 +26,18 @@ export async function uploadToS3(
 
   await s3Client.send(command);
   return key;
+}
+
+export async function downloadFromS3(bucket: string, key: string): Promise<Buffer> {
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  const response = await s3Client.send(command);
+  const stream = response.Body as Readable;
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Uint8Array[] = [];
+    stream.on('data', (chunk: Uint8Array) => chunks.push(chunk));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
 }
 
 export async function getPresignedUrl(key: string): Promise<string> {

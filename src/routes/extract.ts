@@ -1,0 +1,178 @@
+import { Router, Request, Response } from 'express';
+import mongoose from 'mongoose';
+import { Doc } from '../models/Document';
+import { Section } from '../models/Section';
+import { Inquiry } from '../models/Inquiry';
+import { downloadFromS3 } from '../s3';
+import { extractDocument } from '../services/gemini';
+
+const router = Router();
+
+// ─── Background pipeline ──────────────────────────────────────────────────────
+
+async function runPipeline(docId: string): Promise<void> {
+  const doc = await Doc.findById(docId);
+  if (!doc || !doc.s3Key) return;
+
+  try {
+    doc.processingStatus = 'processing';
+    doc.processingError  = '';
+    await doc.save();
+
+    // 1. Download file from S3
+    const buffer = await downloadFromS3(doc.s3Bucket, doc.s3Key);
+
+    // 2. Resolve inquiry scope for a richer Gemini prompt
+    const inquiry = await Inquiry.findOne({ inquiryId: doc.inquiryId }).lean();
+    const scope   = inquiry
+      ? `${inquiry.client} · ${inquiry.project} — ${inquiry.scope}`
+      : doc.inquiryId;
+
+    // 3. Single Gemini call: extract + summarise
+    const result = await extractDocument(
+      buffer,
+      doc.mimeType || 'application/pdf',
+      doc.docType,
+      scope,
+      doc.inquiryId,
+    );
+
+    // 4. Persist results into Document
+    doc.aiSummary         = result.overview;
+    doc.keyItems          = result.keyItems;
+    doc.extractedSections = result.sections.map(s => ({
+      title:   s.title,
+      content: s.content,
+      summary: s.summary,
+    }));
+    doc.processingStatus = 'done';
+    await doc.save();
+
+    // 5. Upsert sections into the Section collection
+    //    Delete stale sections from a previous extraction run first.
+    await Section.deleteMany({ documentId: new mongoose.Types.ObjectId(docId) });
+
+    if (result.sections.length > 0) {
+      await Section.insertMany(
+        result.sections.map((s, i) => ({
+          inquiryId:     doc.inquiryId,
+          documentId:    doc._id,
+          docType:       doc.docType,
+          documentTitle: doc.title,
+          sectionIndex:  i,
+          title:         s.title,
+          content:       s.content,
+          summary:       s.summary,
+        })),
+      );
+    }
+
+    console.log(
+      `[extract] ✓ ${doc.docType} — ${doc.title} (${doc.inquiryId}) ` +
+      `| ${result.sections.length} sections saved`,
+    );
+  } catch (err) {
+    doc.processingStatus = 'failed';
+    doc.processingError  = String(err);
+    await doc.save();
+    console.error(`[extract] ✗ ${docId}:`, err);
+  }
+}
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
+
+// POST /api/extract/document/:docId
+// Triggers Gemini extraction for one document. Responds 202, processes async.
+router.post('/document/:docId', async (req: Request, res: Response) => {
+  const doc = await Doc.findById(req.params.docId).lean();
+
+  if (!doc) {
+    res.status(404).json({ error: 'Document not found.' });
+    return;
+  }
+  if (!doc.s3Key) {
+    res.status(400).json({
+      error: 'No file uploaded for this document. Upload a file before extracting.',
+    });
+    return;
+  }
+  if (doc.processingStatus === 'processing') {
+    res.status(409).json({ error: 'Extraction already in progress.' });
+    return;
+  }
+
+  res.status(202).json({
+    message:   'Extraction started.',
+    docId:     doc._id,
+    statusUrl: `/api/extract/document/${doc._id}`,
+  });
+
+  runPipeline(String(doc._id)).catch(console.error);
+});
+
+// GET /api/extract/document/:docId
+// Poll for extraction results.
+router.get('/document/:docId', async (req: Request, res: Response) => {
+  const doc = await Doc.findById(req.params.docId)
+    .select(
+      'inquiryId docType title processingStatus processingError ' +
+      'aiSummary keyItems extractedSections updatedAt'
+    )
+    .lean();
+
+  if (!doc) {
+    res.status(404).json({ error: 'Document not found.' });
+    return;
+  }
+
+  res.json(doc);
+});
+
+// POST /api/extract/inquiry/:inquiryId
+// Triggers extraction for every uploaded-but-unprocessed document of an inquiry.
+router.post('/inquiry/:inquiryId', async (req: Request, res: Response) => {
+  const inquiryId = decodeURIComponent(req.params.inquiryId);
+
+  const pending = await Doc.find({
+    inquiryId,
+    s3Key:            { $ne: '' },
+    processingStatus: { $in: ['pending', 'failed'] },
+  }).lean();
+
+  if (pending.length === 0) {
+    res.json({ message: 'No documents pending extraction.', queued: 0 });
+    return;
+  }
+
+  res.status(202).json({
+    message: `Extraction queued for ${pending.length} document(s).`,
+    queued:  pending.length,
+    docIds:  pending.map(d => d._id),
+  });
+
+  for (const doc of pending) {
+    runPipeline(String(doc._id)).catch(console.error);
+  }
+});
+
+// GET /api/extract/inquiry/:inquiryId
+// Status overview for all documents of an inquiry.
+router.get('/inquiry/:inquiryId', async (req: Request, res: Response) => {
+  const inquiryId = decodeURIComponent(req.params.inquiryId);
+
+  const docs = await Doc.find({ inquiryId })
+    .select('docType title s3Key processingStatus processingError aiSummary keyItems')
+    .lean();
+
+  res.json({
+    total:     docs.length,
+    uploaded:  docs.filter(d => d.s3Key).length,
+    done:      docs.filter(d => d.processingStatus === 'done').length,
+    processing:docs.filter(d => d.processingStatus === 'processing').length,
+    failed:    docs.filter(d => d.processingStatus === 'failed').length,
+    pending:   docs.filter(d => d.processingStatus === 'pending').length,
+    documents: docs,
+  });
+});
+
+export default router;
