@@ -12,6 +12,10 @@ import documentsRouter from './routes/documents';
 import extractRouter from './routes/extract';
 import sectionsRouter from './routes/sections';
 import stage3Router   from './routes/stage3';
+import stage4Router   from './routes/stage4';
+import stage6Router   from './routes/stage6';
+import stage7Router   from './routes/stage7';
+import stage8Router   from './routes/stage8';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -26,6 +30,10 @@ app.use('/api/documents', documentsRouter);
 app.use('/api/extract',   extractRouter);
 app.use('/api/sections',  sectionsRouter);
 app.use('/api/stage3',    stage3Router);
+app.use('/api/stage4',    stage4Router);
+app.use('/api/stage6',    stage6Router);
+app.use('/api/stage7',    stage7Router);
+app.use('/api/stage8',    stage8Router);
 
 // Health check
 app.get('/health', (_req, res) => {
