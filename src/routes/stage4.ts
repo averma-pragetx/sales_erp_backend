@@ -75,7 +75,7 @@ router.post('/:inquiryId/extract', async (req: Request, res: Response) => {
     await work.save();
 
     // ── Download PDF ─────────────────────────────────────────────────────────
-    const buffer = await downloadFromS3(doc.s3Bucket, doc.s3Key);
+    const buffer = await downloadFromS3(doc.s3Key);
 
     const scope = `${inquiry.client} · ${inquiry.project} — ${inquiry.scope}`;
 

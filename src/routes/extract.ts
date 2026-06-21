@@ -20,7 +20,7 @@ async function runPipeline(docId: string): Promise<void> {
     await doc.save();
 
     // 1. Download file from S3
-    const buffer = await downloadFromS3(doc.s3Bucket, doc.s3Key);
+    const buffer = await downloadFromS3(doc.s3Key);
 
     // 2. Resolve inquiry scope for a richer Gemini prompt
     const inquiry = await Inquiry.findOne({ inquiryId: doc.inquiryId }).lean();
@@ -129,29 +129,60 @@ router.get('/document/:docId', async (req: Request, res: Response) => {
 });
 
 // POST /api/extract/inquiry/:inquiryId
-// Triggers extraction for every uploaded-but-unprocessed document of an inquiry.
+// Synchronously extracts all uploaded-but-unprocessed documents for an inquiry.
+// Awaits Gemini for every document and returns the full results.
 router.post('/inquiry/:inquiryId', async (req: Request, res: Response) => {
-  const inquiryId = decodeURIComponent(req.params.inquiryId);
+  try {
+    const inquiryId = decodeURIComponent(req.params.inquiryId);
 
-  const pending = await Doc.find({
-    inquiryId,
-    s3Key:            { $ne: '' },
-    processingStatus: { $in: ['pending', 'failed'] },
-  }).lean();
+    const force = req.query.force === 'true';
+    const statusFilter = force
+      ? { $in: ['pending', 'processing', 'done', 'failed'] }
+      : { $in: ['pending', 'failed'] };
 
-  if (pending.length === 0) {
-    res.json({ message: 'No documents pending extraction.', queued: 0 });
-    return;
-  }
+    const pending = await Doc.find({
+      inquiryId,
+      s3Key:            { $ne: '' },
+      processingStatus: statusFilter,
+    }).lean();
 
-  res.status(202).json({
-    message: `Extraction queued for ${pending.length} document(s).`,
-    queued:  pending.length,
-    docIds:  pending.map(d => d._id),
-  });
+    if (!force && pending.length === 0) {
+      const docs = await Doc.find({ inquiryId, s3Key: { $ne: '' } })
+        .select('docType title processingStatus processingError aiSummary keyItems extractedSections')
+        .lean();
+      res.json({ message: 'All documents already extracted.', processed: 0, documents: docs });
+      return;
+    }
 
-  for (const doc of pending) {
-    runPipeline(String(doc._id)).catch(console.error);
+    if (pending.length === 0) {
+      res.json({ message: 'No uploaded documents found.', processed: 0, documents: [] });
+      return;
+    }
+
+    // Reset status so runPipeline picks them up fresh (needed for force re-extract)
+    if (force) {
+      await Doc.updateMany(
+        { _id: { $in: pending.map(d => d._id) } },
+        { $set: { processingStatus: 'pending', processingError: '' } },
+      );
+    }
+
+    // Run all pipelines concurrently, await all to finish
+    await Promise.all(pending.map(doc => runPipeline(String(doc._id))));
+
+    // Return updated documents with extraction results
+    const docs = await Doc.find({ inquiryId, s3Key: { $ne: '' } })
+      .select('docType title processingStatus processingError aiSummary keyItems extractedSections')
+      .lean();
+
+    res.json({
+      message:   `Extracted ${pending.length} document(s).`,
+      processed: pending.length,
+      documents: docs,
+    });
+  } catch (err) {
+    console.error('[extract] inquiry error:', err);
+    res.status(500).json({ error: 'Extraction failed.', details: String(err) });
   }
 });
 

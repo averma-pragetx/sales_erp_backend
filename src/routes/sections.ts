@@ -89,6 +89,57 @@ router.get('/:sectionId', async (req: Request, res: Response) => {
   }
 });
 
+// ─── PATCH /api/sections/:sectionId ──────────────────────────────────────────
+// Update a section's summary and/or title (e.g. after manual review).
+router.patch('/:sectionId', async (req: Request, res: Response) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.sectionId)) {
+      res.status(400).json({ error: 'Invalid section ID.' });
+      return;
+    }
+
+    const { summary, title, reviewDecision, reviewNote } = req.body as {
+      summary?: string;
+      title?: string;
+      reviewDecision?: 'pending' | 'ok' | 'flagged' | 'issue';
+      reviewNote?: string;
+    };
+    const fields: Record<string, string> = {};
+    if (summary        !== undefined) fields.summary        = summary;
+    if (title          !== undefined) fields.title          = title;
+    if (reviewNote     !== undefined) fields.reviewNote     = reviewNote;
+    if (reviewDecision !== undefined) {
+      const valid = ['pending', 'ok', 'flagged', 'issue'];
+      if (!valid.includes(reviewDecision)) {
+        res.status(400).json({ error: `reviewDecision must be one of: ${valid.join(', ')}.` });
+        return;
+      }
+      fields.reviewDecision = reviewDecision;
+    }
+
+    if (Object.keys(fields).length === 0) {
+      res.status(400).json({ error: 'Provide at least one of: summary, title, reviewDecision, reviewNote.' });
+      return;
+    }
+
+    const section = await Section.findByIdAndUpdate(
+      req.params.sectionId,
+      { $set: fields },
+      { new: true, lean: true },
+    );
+
+    if (!section) {
+      res.status(404).json({ error: 'Section not found.' });
+      return;
+    }
+
+    res.json(section);
+  } catch (err) {
+    console.error('[sections] update error:', err);
+    res.status(500).json({ error: 'Failed to update section.' });
+  }
+});
+
 // ─── DELETE /api/sections/:sectionId ──────────────────────────────────────────
 // Remove a single section (e.g. if it was incorrectly extracted).
 router.delete('/:sectionId', async (req: Request, res: Response) => {

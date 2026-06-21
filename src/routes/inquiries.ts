@@ -42,4 +42,32 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /:id — update completedUpTo, currentStage, currentStageName
+router.patch('/:id', async (req: Request, res: Response) => {
+  try {
+    const inquiryId = decodeURIComponent(req.params.id);
+    const { completedUpTo, currentStage, currentStageName } = req.body;
+
+    const fields: Record<string, unknown> = {};
+    if (completedUpTo !== undefined) fields.completedUpTo = completedUpTo;
+    if (currentStage !== undefined) fields.currentStage = currentStage;
+    if (currentStageName !== undefined) fields.currentStageName = currentStageName;
+
+    const updated = await Inquiry.findOneAndUpdate(
+      { inquiryId },
+      { $set: fields },
+      { new: true, lean: true },
+    );
+
+    if (!updated) {
+      res.status(404).json({ error: 'Inquiry not found' });
+      return;
+    }
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating inquiry:', error);
+    res.status(500).json({ error: 'Failed to update inquiry' });
+  }
+});
+
 export default router;

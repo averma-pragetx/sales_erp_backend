@@ -15,6 +15,10 @@ export interface ISection extends Document {
   content:       string;
   summary:       string;
 
+  // Stage 2 review
+  reviewDecision: 'pending' | 'ok' | 'flagged' | 'issue';
+  reviewNote:     string;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,6 +33,8 @@ const SectionSchema = new Schema<ISection>(
     title:         { type: String, required: true },
     content:       { type: String, default: '' },
     summary:       { type: String, default: '' },
+    reviewDecision: { type: String, enum: ['pending', 'ok', 'flagged', 'issue'], default: 'pending' },
+    reviewNote:     { type: String, default: '' },
   },
   { timestamps: true },
 );

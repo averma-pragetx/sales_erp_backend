@@ -22,32 +22,32 @@ const RESPONSE_SCHEMA = {
     overview: {
       type: Type.STRING,
       description:
-        '2–3 sentence plain-English summary: what is being procured, by whom, and the key constraint (timeline / spec / quantity).',
+        'Two sentences max. What is being procured, by whom, and the single most critical constraint. Under 50 words total.',
     },
     keyItems: {
       type: Type.ARRAY,
       description:
-        '6–10 bullet strings a sales engineer must know: scope of supply, equipment TAG numbers, quantities, critical specs (P/T/material), delivery, payment terms, bid submission requirements, applicable codes & standards.',
+        'Exactly 6 bullet strings (no more). Each under 15 words. Cover: scope, TAG numbers, quantity, delivery date, payment terms, bid deadline.',
       items: { type: Type.STRING },
     },
     sections: {
       type: Type.ARRAY,
-      description: 'Every significant section or clause found in the document.',
+      description:
+        'The 8 most commercially significant sections only (no more than 8). Skip boilerplate like definitions or general conditions.',
       items: {
         type: Type.OBJECT,
         properties: {
           title: {
             type: Type.STRING,
-            description: 'Exact section heading as it appears in the document.',
+            description: 'Section heading. Under 10 words.',
           },
           content: {
             type: Type.STRING,
-            description: 'Key data points from this section, condensed to 3–5 sentences.',
+            description: 'One sentence. State the single most important requirement. Under 25 words.',
           },
           summary: {
             type: Type.STRING,
-            description:
-              '1–2 sentence takeaway for the sales/estimation team: what action or awareness this section demands.',
+            description: 'One sentence action item for the sales team. Under 20 words.',
           },
         },
         required: ['title', 'content', 'summary'],
@@ -80,29 +80,45 @@ export async function extractDocument(
   const prompt =
     `You are a senior sales engineer at a pressure-vessel and heat-exchanger manufacturing company. ` +
     `Analyze this ${docType} document for inquiry ${inquiryId} (scope: ${scope}). ` +
-    `Extract every significant section and identify all critical commercial and technical requirements ` +
-    `that the estimation / sales team needs to prepare a competitive bid. ` +
-    `Pay special attention to: scope of supply, quantities, TAG numbers, design codes, ` +
-    `material specifications, inspection/testing requirements, delivery schedule, ` +
-    `payment terms, bid validity, and any deviations from standard.`;
+    `Be EXTREMELY concise. Follow the character limits in the schema strictly. ` +
+    `Return no more than 8 sections and 6 key items. ` +
+    `Each field must be one short sentence only — never copy raw text from the document verbatim.`;
 
-  const response = await ai.models.generateContent({
+  const stream = await ai.models.generateContentStream({
     model: 'gemini-2.5-flash',
     contents: [
-      { text: prompt },
       {
-        inlineData: {
-          mimeType: mimeType as 'application/pdf',
-          data:     base64Data,
-        },
+        role: 'user',
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType, data: base64Data } },
+        ],
       },
     ],
     config: {
       responseMimeType: 'application/json',
       responseSchema:   RESPONSE_SCHEMA,
+      maxOutputTokens:  65536,
     },
   });
 
-  const result = JSON.parse(response.text ?? '{}') as ExtractionResult;
-  return result;
+  let raw = '';
+  for await (const chunk of stream) {
+    raw += chunk.text || '';
+  }
+
+  raw = raw.trim();
+  if (!raw) throw new Error('Gemini returned an empty response. Check your API key and model access.');
+
+  const result = JSON.parse(raw) as Partial<ExtractionResult>;
+
+  return {
+    overview: result.overview  ?? '',
+    keyItems: result.keyItems  ?? [],
+    sections: (result.sections ?? []).map(s => ({
+      title:   s.title   ?? '',
+      content: s.content ?? '',
+      summary: s.summary ?? '',
+    })),
+  };
 }
