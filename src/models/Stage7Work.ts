@@ -8,10 +8,12 @@ export interface IBomItem {
   quantityUnit: string;   // "nos", "sets", "lot", etc.
   rateInr:      number;   // rate per unit in INR
   totalInr:     number;   // rateInr × quantity (stored for fast reads)
-  aiEstimated:  boolean;  // true = Gemini provided the rate; false = manual override
-  rationale:    string;   // Gemini's 1-sentence reasoning
+  aiEstimated:  boolean;  // true = AI provided the rate; false = manual override
+  rationale:    string;   // AI's 1-sentence reasoning
   confidence:   string;   // "high" | "medium" | "low" | "manual"
+  moc:          string;   // Material of Construction / type (e.g. "CS", "SS 316L")
   notes:        string;
+  remarks:      string;   // free-text remarks entered by the user
 }
 
 export interface IStage7Work extends Document {
@@ -36,7 +38,9 @@ const BomItemSchema = new Schema<IBomItem>(
     aiEstimated:  { type: Boolean, default: false },
     rationale:    { type: String, default: '' },
     confidence:   { type: String, default: '' },
+    moc:          { type: String, default: '' },
     notes:        { type: String, default: '' },
+    remarks:      { type: String, default: '' },
   },
   { _id: true },
 );

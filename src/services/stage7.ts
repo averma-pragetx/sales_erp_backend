@@ -7,22 +7,23 @@ function getClient(): OpenAI {
 }
 
 export interface TagListInput {
-  tagNumber:     string;
-  productName:   string;
-  dimensions:    string;
+  tagNumber: string;
+  productName: string;
+  dimensions: string;
   weightPerUnit: string;
-  quantity:      string;
-  notes:         string;
+  quantity: string;
+  notes: string;
 }
 
 export interface PricedItem {
-  tagNumber:        string;
-  productName:      string;
-  quantity:         number;
-  quantityUnit:     string;
+  tagNumber: string;
+  productName: string;
+  quantity: number;
+  quantityUnit: string;
   estimatedRateInr: number;
-  rationale:        string;
-  confidence:       string;
+  rationale: string;
+  confidence: string;
+  moc: string;
 }
 
 export interface PricingResult {
@@ -31,18 +32,18 @@ export interface PricingResult {
 
 export function parseQuantity(raw: string): { qty: number; unit: string } {
   if (!raw || raw.toLowerCase() === 'not specified') return { qty: 1, unit: 'nos' };
-  const numMatch  = raw.match(/(\d+(?:\.\d+)?)/);
+  const numMatch = raw.match(/(\d+(?:\.\d+)?)/);
   const unitMatch = raw.replace(/[\d.,]/g, '').trim();
   return {
-    qty:  numMatch ? parseFloat(numMatch[1]) : 1,
+    qty: numMatch ? parseFloat(numMatch[1]) : 1,
     unit: unitMatch || 'nos',
   };
 }
 
 export async function estimateBom(
   inquiryId: string,
-  scope:     string,
-  tags:      TagListInput[],
+  scope: string,
+  tags: TagListInput[],
 ): Promise<PricingResult> {
   const ai = getClient();
 
@@ -57,33 +58,36 @@ export async function estimateBom(
 
   const systemPrompt =
     `You are an experienced cost estimator for industrial process equipment in India. ` +
-    `Respond ONLY with valid JSON: { "items": [{ "estimatedRateInr": number, "rationale": "string", "confidence": "high|medium|low" }] }. ` +
+    `Respond ONLY with valid JSON: { "items": [{ "estimatedRateInr": number, "moc": "string", "rationale": "string", "confidence": "high|medium|low" }] }. ` +
     `Return EXACTLY ${tags.length} items in the same order as the input. ` +
     `estimatedRateInr must be an integer (ex-works price per unit in INR). ` +
-    `rationale is one sentence. confidence is "high", "medium", or "low".`;
+    `moc is the most likely Material of Construction or equipment type (e.g. "CS", "SS 316L", "Duplex SS 2205", "HDPE", "Cast Iron", "Alloy 625", "FRP") — infer from product name, notes, and typical industry standards. ` +
+    `rationale is one sentence covering both the price basis and MOC reasoning. ` +
+    `confidence is "high", "medium", or "low".`;
 
   const userPrompt =
     `Inquiry: ${inquiryId} — Scope: ${scope}\n\n` +
-    `Estimate the ex-works unit price in INR for each item. Use Indian fabrication costs, ` +
-    `steel prices, machining rates, and EPC project rates as of 2025-2026. ` +
-    `Rate per unit only (not total). Provide a best-effort estimate even for uncertain items.\n\n` +
+    `For each item: estimate the ex-works unit price in INR AND determine the most likely MOC/type. ` +
+    `Use Indian fabrication costs, steel prices, machining rates, and EPC project rates as of 2025-2026. ` +
+    `Rate per unit only (not total). Infer MOC from product name, dimensions, service notes, and industry norms. ` +
+    `Provide a best-effort estimate even for uncertain items.\n\n` +
     `Items (${tags.length} total):\n\n${itemLines}`;
 
   const res = await ai.chat.completions.create({
-    model:           'gpt-4o',
+    model: 'gpt-5.4',
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userPrompt },
+      { role: 'user', content: userPrompt },
     ],
   });
 
   const raw = JSON.parse(res.choices[0].message.content ?? '{}') as {
-    items: { estimatedRateInr: number; rationale: string; confidence: string }[];
+    items: { estimatedRateInr: number; moc: string; rationale: string; confidence: string }[];
   };
 
   const items: PricedItem[] = tags.map((t, i) => {
-    const priced = raw.items?.[i] ?? { estimatedRateInr: 0, rationale: '', confidence: 'low' };
+    const priced = raw.items?.[i] ?? { estimatedRateInr: 0, moc: '', rationale: '', confidence: 'low' };
     const { qty, unit } = parseQuantity(t.quantity);
     return {
       tagNumber:        t.tagNumber === 'not specified' ? '' : t.tagNumber,
@@ -91,6 +95,7 @@ export async function estimateBom(
       quantity:         qty,
       quantityUnit:     unit,
       estimatedRateInr: Math.round(Math.max(0, priced.estimatedRateInr ?? 0)),
+      moc:              priced.moc ?? '',
       rationale:        priced.rationale ?? '',
       confidence:       priced.confidence ?? 'low',
     };

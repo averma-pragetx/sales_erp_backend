@@ -12,7 +12,7 @@ function getClient(): OpenAI {
 }
 
 export interface TagExtractionResult {
-  tags:            ITagItem[];
+  tags: ITagItem[];
   extractionNotes: string;
 }
 
@@ -38,11 +38,11 @@ const SYSTEM_PROMPT =
   `Do NOT invent values — only extract what is explicitly stated.`;
 
 export async function extractTagList(
-  buffer:        Buffer,
-  mimeType:      string,
-  inquiryId:     string,
+  buffer: Buffer,
+  mimeType: string,
+  inquiryId: string,
   documentTitle: string,
-  scope:         string,
+  scope: string,
 ): Promise<TagExtractionResult> {
   const ai = getClient();
 
@@ -91,7 +91,7 @@ export async function extractTagList(
   }
 
   const res = await ai.chat.completions.create({
-    model:           'gpt-4o',
+    model: 'gpt-5.4',
     response_format: { type: 'json_object' },
     messages,
   });

@@ -1,9 +1,9 @@
 import OpenAI from 'openai';
-import { Inquiry }    from '../models/Inquiry';
-import { Section }    from '../models/Section';
+import { Inquiry } from '../models/Inquiry';
+import { Section } from '../models/Section';
 import { Stage3Work } from '../models/Stage3Work';
 import { Stage4Work } from '../models/Stage4Work';
-import { TechQuery }  from '../models/TechQuery';
+import { TechQuery } from '../models/TechQuery';
 import { Stage7Work } from '../models/Stage7Work';
 
 function getClient(): OpenAI {
@@ -14,7 +14,7 @@ function getClient(): OpenAI {
 
 export interface ProposalResult {
   title: string;
-  body:  string;
+  body: string;
 }
 
 function inr(n: number): string {
@@ -55,47 +55,47 @@ export async function draftProposal(inquiryId: string): Promise<ProposalResult> 
 
   const sectionsBlock = sections.length > 0
     ? sections.map(s =>
-        `Document: ${s.documentTitle} (${s.docType}) | Section: "${s.title}"\n` +
-        `Summary: ${s.summary}\n` +
-        (s.content.length <= 1200 ? `Content:\n${s.content}` : `Content (excerpt):\n${s.content.slice(0, 1200)}…`)
-      ).join('\n\n---\n\n')
+      `Document: ${s.documentTitle} (${s.docType}) | Section: "${s.title}"\n` +
+      `Summary: ${s.summary}\n` +
+      (s.content.length <= 1200 ? `Content:\n${s.content}` : `Content (excerpt):\n${s.content.slice(0, 1200)}…`)
+    ).join('\n\n---\n\n')
     : '(No RFQ sections extracted yet — base proposal on enquiry scope and tag list.)';
 
   const tagsBlock = (stage4?.status === 'done' && stage4.tags.length > 0)
     ? stage4.tags.map((t, i) =>
-        `${String(i + 1).padStart(2, '0')}. TAG: ${t.tagNumber} | Product: ${t.productName} | ` +
-        `Qty: ${t.quantity} | Dimensions: ${t.dimensions} | Wt/unit: ${t.weightPerUnit}` +
-        (t.notes ? ` | Notes: ${t.notes}` : '')
-      ).join('\n')
+      `${String(i + 1).padStart(2, '0')}. TAG: ${t.tagNumber} | Product: ${t.productName} | ` +
+      `Qty: ${t.quantity} | Dimensions: ${t.dimensions} | Wt/unit: ${t.weightPerUnit}` +
+      (t.notes ? ` | Notes: ${t.notes}` : '')
+    ).join('\n')
     : '(Tag list not yet extracted — include a placeholder equipment schedule.)';
 
   const gapBlock = (stage3?.gapAnalysis?.status === 'done')
     ? [
-        `Required sections : ${stage3.gapAnalysis.requiredSections.join(', ') || 'N/A'}`,
-        `Received sections : ${stage3.gapAnalysis.receivedSections.join(', ') || 'N/A'}`,
-        `Critical gaps     :`,
-        ...(stage3.gapAnalysis.gaps.map(g => `  • [${g.severity.toUpperCase()}] ${g.section} — ${g.reason}`)),
-        `Recommendation    : ${stage3.gapAnalysis.recommendation}`,
-      ].join('\n')
+      `Required sections : ${stage3.gapAnalysis.requiredSections.join(', ') || 'N/A'}`,
+      `Received sections : ${stage3.gapAnalysis.receivedSections.join(', ') || 'N/A'}`,
+      `Critical gaps     :`,
+      ...(stage3.gapAnalysis.gaps.map(g => `  • [${g.severity.toUpperCase()}] ${g.section} — ${g.reason}`)),
+      `Recommendation    : ${stage3.gapAnalysis.recommendation}`,
+    ].join('\n')
     : '(Gap analysis not yet run.)';
 
   const tqBlock = tqs.length > 0
     ? tqs.map(tq =>
-        `${tq.tqNumber}  |  TAG/Clause: ${tq.tagClause} / ${tq.clauseRef}  |  To: ${tq.sendTo}\n` +
-        `Q: ${tq.question}\n` +
-        `A: ${tq.answer}`
-      ).join('\n\n')
+      `${tq.tqNumber}  |  TAG/Clause: ${tq.tagClause} / ${tq.clauseRef}  |  To: ${tq.sendTo}\n` +
+      `Q: ${tq.question}\n` +
+      `A: ${tq.answer}`
+    ).join('\n\n')
     : '(No answered technical queries — state "No technical deviations or clarifications at this stage.")';
 
   const bomBlock = (bom?.status === 'done' && bom.items.length > 0)
     ? [
-        bom.items.map((item, i) =>
-          `${String(i + 1).padStart(2, '0')}. TAG: ${item.tagNumber || '—'} | ` +
-          `${item.productName} | Qty: ${item.quantity} ${item.quantityUnit} | ` +
-          `Unit Rate: ${inr(item.rateInr)} | Total: ${inr(item.totalInr)}`
-        ).join('\n'),
-        `\nGrand Total (ex-GST): ${inr(bom.grandTotalInr)}`,
-      ].join('\n')
+      bom.items.map((item, i) =>
+        `${String(i + 1).padStart(2, '0')}. TAG: ${item.tagNumber || '—'} | ` +
+        `${item.productName} | Qty: ${item.quantity} ${item.quantityUnit} | ` +
+        `Unit Rate: ${inr(item.rateInr)} | Total: ${inr(item.totalInr)}`
+      ).join('\n'),
+      `\nGrand Total (ex-GST): ${inr(bom.grandTotalInr)}`,
+    ].join('\n')
     : '(BOM not yet estimated — include a placeholder pricing table with TBD values.)';
 
   const systemPrompt =
@@ -132,12 +132,12 @@ Sign off contact as "[Contact Name] | Proposals Department | Oswal Engineering P
   const ai = getClient();
 
   const res = await ai.chat.completions.create({
-    model:           'gpt-4o',
+    model: 'gpt-5.4',
     response_format: { type: 'json_object' },
-    max_tokens:      8192,
+    max_tokens: 8192,
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userPrompt },
+      { role: 'user', content: userPrompt },
     ],
   });
 

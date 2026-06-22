@@ -8,31 +8,31 @@ function getClient(): OpenAI {
 }
 
 export interface SectionInput {
-  docType:       string;
+  docType: string;
   documentTitle: string;
-  title:         string;
-  summary:       string;
+  title: string;
+  summary: string;
 }
 
 export interface GapAnalysisResult {
   requiredSections: string[];
   receivedSections: string[];
-  gaps:             IGap[];
-  recommendation:   string;
+  gaps: IGap[];
+  recommendation: string;
 }
 
 export interface EmailDraftResult {
   subject: string;
-  body:    string;
+  body: string;
 }
 
 // ─── 1. Gap analysis ─────────────────────────────────────────────────────────
 
 export async function analyseGaps(
   inquiryId: string,
-  scope:     string,
-  client:    string,
-  sections:  SectionInput[],
+  scope: string,
+  client: string,
+  sections: SectionInput[],
 ): Promise<GapAnalysisResult> {
   const ai = getClient();
 
@@ -57,11 +57,11 @@ export async function analyseGaps(
     `Identify required sections, received sections, critical gaps, and give a 1-2 sentence recommendation.`;
 
   const res = await ai.chat.completions.create({
-    model:           'gpt-4o',
+    model: 'gpt-5.4',
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userPrompt },
+      { role: 'user', content: userPrompt },
     ],
   });
 
@@ -73,16 +73,16 @@ export async function analyseGaps(
 // ─── 2. Acknowledgment email draft ───────────────────────────────────────────
 
 export async function draftEmail(
-  inquiryId:   string,
-  scope:       string,
-  client:      string,
-  project:     string,
+  inquiryId: string,
+  scope: string,
+  client: string,
+  project: string,
   gapAnalysis: GapAnalysisResult,
 ): Promise<EmailDraftResult> {
   const ai = getClient();
 
   const received = gapAnalysis.receivedSections.join(', ') || 'none identified';
-  const missing  = gapAnalysis.gaps.length > 0
+  const missing = gapAnalysis.gaps.length > 0
     ? gapAnalysis.gaps.map(g => `• ${g.section} — ${g.reason}`).join('\n')
     : 'All critical sections appear to be present.';
 
@@ -101,11 +101,11 @@ export async function draftEmail(
     `with a suggested response deadline, and state estimation commences once the complete package is received.`;
 
   const res = await ai.chat.completions.create({
-    model:           'gpt-4o',
+    model: 'gpt-5.4',
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userPrompt },
+      { role: 'user', content: userPrompt },
     ],
   });
 

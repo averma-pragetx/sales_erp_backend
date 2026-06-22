@@ -33,7 +33,9 @@ function formatBom(work: InstanceType<typeof Stage7Work>) {
       aiEstimated:  item.aiEstimated,
       rationale:    item.rationale,
       confidence:   item.confidence,
+      moc:          item.moc,
       notes:        item.notes,
+      remarks:      item.remarks,
     })),
   };
 }
@@ -121,7 +123,9 @@ router.post('/:inquiryId/estimate', async (req: Request, res: Response) => {
       aiEstimated:  true,
       rationale:    p.rationale,
       confidence:   p.confidence,
+      moc:          p.moc,
       notes:        '',
+      remarks:      '',
     }));
 
     recompute(work);
@@ -150,13 +154,15 @@ router.post('/:inquiryId/items', async (req: Request, res: Response) => {
   try {
     const inquiryId = decodeURIComponent(req.params.inquiryId);
 
-    const { productName, quantity, quantityUnit, rateInr, tagNumber, notes } = req.body as {
+    const { productName, quantity, quantityUnit, rateInr, tagNumber, moc, notes, remarks } = req.body as {
       productName:   string;
       quantity:      number;
       quantityUnit?: string;
       rateInr:       number;
       tagNumber?:    string;
+      moc?:          string;
       notes?:        string;
+      remarks?:      string;
     };
 
     if (!productName?.trim()) {
@@ -188,7 +194,9 @@ router.post('/:inquiryId/items', async (req: Request, res: Response) => {
       aiEstimated:  false,
       rationale:    '',
       confidence:   'manual',
+      moc:          (moc ?? '').trim(),
       notes:        (notes ?? '').trim(),
+      remarks:      (remarks ?? '').trim(),
     });
 
     recompute(work);
@@ -225,19 +233,23 @@ router.patch('/:inquiryId/items/:itemId', async (req: Request, res: Response) =>
       return;
     }
 
-    const { productName, quantity, quantityUnit, rateInr, tagNumber, notes } = req.body as {
+    const { productName, quantity, quantityUnit, rateInr, tagNumber, moc, notes, remarks } = req.body as {
       productName?:  string;
       quantity?:     number;
       quantityUnit?: string;
       rateInr?:      number;
       tagNumber?:    string;
+      moc?:          string;
       notes?:        string;
+      remarks?:      string;
     };
 
     if (productName  !== undefined) item.productName  = productName.trim();
     if (tagNumber    !== undefined) item.tagNumber    = tagNumber.trim();
     if (quantityUnit !== undefined) item.quantityUnit = quantityUnit.trim();
+    if (moc          !== undefined) item.moc          = moc.trim();
     if (notes        !== undefined) item.notes        = notes.trim();
+    if (remarks      !== undefined) item.remarks      = remarks.trim();
 
     if (quantity !== undefined) {
       if (typeof quantity !== 'number' || quantity < 0) {
