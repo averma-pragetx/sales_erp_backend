@@ -70,4 +70,51 @@ router.patch('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /:id/kanban — update cluster (and reset stage) on drag-and-drop
+router.patch('/:id/kanban', async (req: Request, res: Response) => {
+  try {
+    const inquiryId = decodeURIComponent(req.params.id);
+    const { cluster } = req.body;
+
+    if (!cluster) {
+      res.status(400).json({ error: 'cluster is required' });
+      return;
+    }
+
+    // Maps each cluster to the first stage number and its display name
+    const clusterDefaults: Record<string, { stage: number; stageName: string }> = {
+      intake:     { stage: 1,  stageName: 'Intake' },
+      estimation: { stage: 3,  stageName: 'Estimation' },
+      proposal:   { stage: 8,  stageName: 'Proposal' },
+      bid_active: { stage: 10, stageName: 'Bid Active' },
+      outcome:    { stage: 12, stageName: 'Outcome' },
+    };
+
+    if (!clusterDefaults[cluster]) {
+      res.status(400).json({
+        error: `Invalid cluster. Must be one of: ${Object.keys(clusterDefaults).join(', ')}`,
+      });
+      return;
+    }
+
+    const { stage, stageName } = clusterDefaults[cluster];
+
+    const updated = await Inquiry.findOneAndUpdate(
+      { inquiryId },
+      { $set: { cluster, currentStage: stage, currentStageName: stageName } },
+      { new: true, lean: true },
+    );
+
+    if (!updated) {
+      res.status(404).json({ error: 'Inquiry not found' });
+      return;
+    }
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating inquiry cluster:', error);
+    res.status(500).json({ error: 'Failed to update inquiry cluster' });
+  }
+});
+
 export default router;
