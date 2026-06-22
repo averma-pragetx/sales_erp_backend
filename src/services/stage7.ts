@@ -1,39 +1,33 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import OpenAI from 'openai';
 
-// ─── Client ───────────────────────────────────────────────────────────────────
-
-function getClient(): GoogleGenAI {
-  const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('Missing GOOGLE_API_KEY in env.');
-  return new GoogleGenAI({ apiKey });
+function getClient(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('Missing OPENAI_API_KEY in env.');
+  return new OpenAI({ apiKey });
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export interface TagListInput {
-  tagNumber:    string;
-  productName:  string;
-  dimensions:   string;
+  tagNumber:     string;
+  productName:   string;
+  dimensions:    string;
   weightPerUnit: string;
-  quantity:     string;   // raw string from Stage 4 ("4 nos", "not specified", etc.)
-  notes:        string;
+  quantity:      string;
+  notes:         string;
 }
 
 export interface PricedItem {
   tagNumber:        string;
   productName:      string;
-  quantity:         number;   // parsed numeric quantity
+  quantity:         number;
   quantityUnit:     string;
   estimatedRateInr: number;
   rationale:        string;
-  confidence:       string;   // "high" | "medium" | "low"
+  confidence:       string;
 }
 
 export interface PricingResult {
   items: PricedItem[];
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function parseQuantity(raw: string): { qty: number; unit: string } {
   if (!raw || raw.toLowerCase() === 'not specified') return { qty: 1, unit: 'nos' };
@@ -44,39 +38,6 @@ export function parseQuantity(raw: string): { qty: number; unit: string } {
     unit: unitMatch || 'nos',
   };
 }
-
-// ─── Gemini response schema ───────────────────────────────────────────────────
-
-const PRICING_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    items: {
-      type: Type.ARRAY,
-      description: 'One entry per input item, in the same order as the input list.',
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          estimatedRateInr: {
-            type: Type.NUMBER,
-            description: 'Estimated ex-works market price per unit in Indian Rupees (INR). Integer value.',
-          },
-          rationale: {
-            type: Type.STRING,
-            description: 'One-sentence reasoning behind the estimate (material, complexity, market rate).',
-          },
-          confidence: {
-            type: Type.STRING,
-            description: '"high" if well-known standard item, "medium" if approximate, "low" if highly uncertain.',
-          },
-        },
-        required: ['estimatedRateInr', 'rationale', 'confidence'],
-      },
-    },
-  },
-  required: ['items'],
-};
-
-// ─── Main estimation function ─────────────────────────────────────────────────
 
 export async function estimateBom(
   inquiryId: string,
@@ -94,29 +55,33 @@ export async function estimateBom(
     (t.notes ? `   Notes: ${t.notes}\n` : ''),
   ).join('\n');
 
-  const prompt =
-    `You are an experienced cost estimator for industrial process equipment in India, ` +
-    `working for an equipment manufacturing/procurement company (Oswal Engineering).\n\n` +
-    `Inquiry: ${inquiryId} — Scope: ${scope}\n\n` +
-    `Estimate the ex-works market price in Indian Rupees (INR) for each item below. ` +
-    `Use your knowledge of Indian fabrication costs, imported equipment duties, steel prices, ` +
-    `machining rates, and typical EPC project rates as of 2025-2026.\n` +
-    `Provide the RATE PER UNIT only (not the total). Even for uncertain items give a best-effort estimate.\n\n` +
-    `Items to price (${tags.length} total):\n\n${itemLines}\n` +
-    `Return exactly ${tags.length} entries in the items array, in the same order as above.`;
+  const systemPrompt =
+    `You are an experienced cost estimator for industrial process equipment in India. ` +
+    `Respond ONLY with valid JSON: { "items": [{ "estimatedRateInr": number, "rationale": "string", "confidence": "high|medium|low" }] }. ` +
+    `Return EXACTLY ${tags.length} items in the same order as the input. ` +
+    `estimatedRateInr must be an integer (ex-works price per unit in INR). ` +
+    `rationale is one sentence. confidence is "high", "medium", or "low".`;
 
-  const response = await ai.models.generateContent({
-    model:    'gemini-2.5-flash',
-    contents: [{ text: prompt }],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema:   PRICING_SCHEMA,
-    },
+  const userPrompt =
+    `Inquiry: ${inquiryId} — Scope: ${scope}\n\n` +
+    `Estimate the ex-works unit price in INR for each item. Use Indian fabrication costs, ` +
+    `steel prices, machining rates, and EPC project rates as of 2025-2026. ` +
+    `Rate per unit only (not total). Provide a best-effort estimate even for uncertain items.\n\n` +
+    `Items (${tags.length} total):\n\n${itemLines}`;
+
+  const res = await ai.chat.completions.create({
+    model:           'gpt-4o',
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: userPrompt },
+    ],
   });
 
-  const raw = JSON.parse(response.text ?? '{}') as { items: { estimatedRateInr: number; rationale: string; confidence: string }[] };
+  const raw = JSON.parse(res.choices[0].message.content ?? '{}') as {
+    items: { estimatedRateInr: number; rationale: string; confidence: string }[];
+  };
 
-  // Merge Gemini response back with original tag data (matched by index)
   const items: PricedItem[] = tags.map((t, i) => {
     const priced = raw.items?.[i] ?? { estimatedRateInr: 0, rationale: '', confidence: 'low' };
     const { qty, unit } = parseQuantity(t.quantity);

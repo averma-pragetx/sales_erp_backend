@@ -1,15 +1,11 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import OpenAI from 'openai';
 import type { IGap } from '../models/Stage3Work';
 
-// ─── Client ───────────────────────────────────────────────────────────────────
-
-function getClient(): GoogleGenAI {
-  const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('Missing GOOGLE_API_KEY in env.');
-  return new GoogleGenAI({ apiKey });
+function getClient(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('Missing OPENAI_API_KEY in env.');
+  return new OpenAI({ apiKey });
 }
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SectionInput {
   docType:       string;
@@ -32,45 +28,11 @@ export interface EmailDraftResult {
 
 // ─── 1. Gap analysis ─────────────────────────────────────────────────────────
 
-const GAP_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    requiredSections: {
-      type: Type.ARRAY,
-      description: 'Section titles typically expected in this type of RFQ package.',
-      items: { type: Type.STRING },
-    },
-    receivedSections: {
-      type: Type.ARRAY,
-      description: 'Section titles actually found across the uploaded documents.',
-      items: { type: Type.STRING },
-    },
-    gaps: {
-      type: Type.ARRAY,
-      description: 'The 2-3 most critical missing or incomplete sections only.',
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          section:  { type: Type.STRING, description: 'Name of the missing or incomplete section.' },
-          reason:   { type: Type.STRING, description: 'Why this section is needed and what impact its absence has.' },
-          severity: { type: Type.STRING, description: 'critical | major | minor' },
-        },
-        required: ['section', 'reason', 'severity'],
-      },
-    },
-    recommendation: {
-      type: Type.STRING,
-      description: '1-2 sentence overall recommendation to the estimator.',
-    },
-  },
-  required: ['requiredSections', 'receivedSections', 'gaps', 'recommendation'],
-};
-
 export async function analyseGaps(
-  inquiryId:  string,
-  scope:      string,
-  client:     string,
-  sections:   SectionInput[],
+  inquiryId: string,
+  scope:     string,
+  client:    string,
+  sections:  SectionInput[],
 ): Promise<GapAnalysisResult> {
   const ai = getClient();
 
@@ -78,53 +40,37 @@ export async function analyseGaps(
     ? sections.map(s => `[${s.docType} — ${s.documentTitle}]\n  Section: ${s.title}\n  Summary: ${s.summary}`).join('\n\n')
     : '(No sections extracted yet — documents may not have been processed.)';
 
-  const prompt =
-    `You are a senior estimator reviewing the RFQ package for inquiry ${inquiryId} ` +
-    `(scope: ${scope}, client: ${client}).\n\n` +
-    `The following sections have been extracted from the uploaded documents:\n\n` +
-    `${sectionList}\n\n` +
-    `Based on standard procurement practice for this type of equipment package, ` +
-    `identify what sections are typically required, which have been received, ` +
-    `and flag the 2-3 most critical gaps or missing sections only. ` +
-    `Be concise and specific — the estimator needs to know exactly what to request from the client.`;
+  const systemPrompt =
+    `You are a senior estimator reviewing an RFQ package. ` +
+    `Respond ONLY with valid JSON matching this exact structure:\n` +
+    `{\n` +
+    `  "requiredSections": ["string"],\n` +
+    `  "receivedSections": ["string"],\n` +
+    `  "gaps": [{ "section": "string", "reason": "string", "severity": "critical|major|minor" }],\n` +
+    `  "recommendation": "string"\n` +
+    `}\n` +
+    `Limit gaps to the 2-3 most critical only. Be concise.`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [{ text: prompt }],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema:   GAP_SCHEMA,
-    },
+  const userPrompt =
+    `Inquiry: ${inquiryId} | Scope: ${scope} | Client: ${client}\n\n` +
+    `Extracted document sections:\n\n${sectionList}\n\n` +
+    `Identify required sections, received sections, critical gaps, and give a 1-2 sentence recommendation.`;
+
+  const res = await ai.chat.completions.create({
+    model:           'gpt-4o',
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: userPrompt },
+    ],
   });
 
-  const result = JSON.parse(response.text ?? '{}') as GapAnalysisResult;
-
-  // Clamp gaps to max 3
-  result.gaps = result.gaps.slice(0, 3);
-
+  const result = JSON.parse(res.choices[0].message.content ?? '{}') as GapAnalysisResult;
+  result.gaps = (result.gaps ?? []).slice(0, 3);
   return result;
 }
 
 // ─── 2. Acknowledgment email draft ───────────────────────────────────────────
-
-const EMAIL_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    subject: {
-      type: Type.STRING,
-      description: 'Concise email subject line referencing the inquiry ID and project.',
-    },
-    body: {
-      type: Type.STRING,
-      description:
-        'Full professional email body in plain text. ' +
-        'Include: acknowledgment of receipt, list of documents received, ' +
-        'list of missing/incomplete sections with a polite request to provide them, ' +
-        'and expected next steps. Sign off as "Estimation Team, Oswal Engineering."',
-    },
-  },
-  required: ['subject', 'body'],
-};
 
 export async function draftEmail(
   inquiryId:   string,
@@ -140,27 +86,28 @@ export async function draftEmail(
     ? gapAnalysis.gaps.map(g => `• ${g.section} — ${g.reason}`).join('\n')
     : 'All critical sections appear to be present.';
 
-  const prompt =
-    `Draft a professional acknowledgment email for inquiry ${inquiryId} — ` +
-    `${client} · ${project} (scope: ${scope}).\n\n` +
-    `Documents received cover these sections: ${received}.\n\n` +
-    `Missing or incomplete sections:\n${missing}\n\n` +
-    `Overall recommendation: ${gapAnalysis.recommendation}\n\n` +
-    `The email should:\n` +
-    `1. Acknowledge receipt of the RFQ package with the inquiry reference\n` +
-    `2. Confirm what has been received\n` +
-    `3. Politely but clearly request the missing sections with a suggested response deadline\n` +
-    `4. State that estimation will commence once the complete package is received\n` +
-    `5. Be professional, concise, and no more than 250 words in the body`;
+  const systemPrompt =
+    `You are drafting a professional B2B email on behalf of Oswal Engineering. ` +
+    `Respond ONLY with valid JSON: { "subject": "string", "body": "string" }. ` +
+    `The body must be plain text (no markdown), max 250 words, signed off as "Estimation Team, Oswal Engineering."`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [{ text: prompt }],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema:   EMAIL_SCHEMA,
-    },
+  const userPrompt =
+    `Draft an RFQ acknowledgment email.\n\n` +
+    `Inquiry: ${inquiryId} | Client: ${client} | Project: ${project} | Scope: ${scope}\n\n` +
+    `Received sections: ${received}\n\n` +
+    `Missing/incomplete sections:\n${missing}\n\n` +
+    `Overall recommendation: ${gapAnalysis.recommendation}\n\n` +
+    `The email should: acknowledge receipt, confirm what was received, politely request missing sections ` +
+    `with a suggested response deadline, and state estimation commences once the complete package is received.`;
+
+  const res = await ai.chat.completions.create({
+    model:           'gpt-4o',
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: userPrompt },
+    ],
   });
 
-  return JSON.parse(response.text ?? '{}') as EmailDraftResult;
+  return JSON.parse(res.choices[0].message.content ?? '{}') as EmailDraftResult;
 }

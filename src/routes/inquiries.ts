@@ -1,5 +1,13 @@
 import { Router, Request, Response } from 'express';
-import { Inquiry } from '../models/Inquiry';
+import { Inquiry }    from '../models/Inquiry';
+import { Doc }        from '../models/Document';
+import { Section }    from '../models/Section';
+import { Stage3Work } from '../models/Stage3Work';
+import { Stage4Work } from '../models/Stage4Work';
+import { Stage5Work } from '../models/Stage5Work';
+import { TechQuery }  from '../models/TechQuery';
+import { Stage7Work } from '../models/Stage7Work';
+import { Stage8Work } from '../models/Stage8Work';
 
 const router = Router();
 
@@ -114,6 +122,32 @@ router.patch('/:id/kanban', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error updating inquiry cluster:', error);
     res.status(500).json({ error: 'Failed to update inquiry cluster' });
+  }
+});
+
+// DELETE /:id — delete inquiry and all associated data
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const inquiryId = decodeURIComponent(req.params.id);
+    const inquiry = await Inquiry.findOneAndDelete({ inquiryId });
+    if (!inquiry) {
+      res.status(404).json({ error: 'Inquiry not found' });
+      return;
+    }
+    await Promise.all([
+      Doc.deleteMany({ inquiryId }),
+      Section.deleteMany({ inquiryId }),
+      Stage3Work.deleteMany({ inquiryId }),
+      Stage4Work.deleteMany({ inquiryId }),
+      Stage5Work.deleteMany({ inquiryId }),
+      TechQuery.deleteMany({ inquiryId }),
+      Stage7Work.deleteMany({ inquiryId }),
+      Stage8Work.deleteMany({ inquiryId }),
+    ]);
+    res.json({ message: 'Inquiry and all related data deleted.' });
+  } catch (error) {
+    console.error('Error deleting inquiry:', error);
+    res.status(500).json({ error: 'Failed to delete inquiry' });
   }
 });
 
