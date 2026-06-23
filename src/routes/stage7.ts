@@ -81,11 +81,18 @@ router.post('/:inquiryId/estimate', async (req: Request, res: Response) => {
       return;
     }
 
-    // ── Guard concurrent runs ────────────────────────────────────────────────
+    // ── Guard concurrent runs (stale lock: >5 min → allow retry) ───────────
     let work = await Stage7Work.findOne({ inquiryId });
     if (work?.status === 'processing') {
-      res.status(409).json({ error: 'Estimation already in progress.' });
-      return;
+      const staleMs = 5 * 60 * 1000;
+      const age     = Date.now() - new Date(work.updatedAt).getTime();
+      if (age < staleMs) {
+        res.status(409).json({ error: 'Estimation already in progress.' });
+        return;
+      }
+      work.status = 'failed';
+      work.error  = 'Previous run timed out.';
+      await work.save();
     }
 
     if (!work) {

@@ -60,40 +60,28 @@ router.post('/:inquiryId/extract', async (req: Request, res: Response) => {
       return;
     }
 
-    // ── Guard against concurrent runs ────────────────────────────────────────
-    const work = await getOrCreate(inquiryId);
-    if (work.status === 'processing') {
-      res.status(409).json({ error: 'Tag list extraction already in progress.' });
-      return;
-    }
+    // ── Download + extract (no intermediate processing state) ────────────────
+    const documentTitle = doc.title || doc.fileName;
+    const scope         = `${inquiry.client} · ${inquiry.project} — ${inquiry.scope}`;
+    const buffer        = await downloadFromS3(doc.s3Key);
 
-    // Mark processing
-    work.status              = 'processing';
-    work.error               = '';
-    work.sourceDocumentId    = doc._id as mongoose.Types.ObjectId;
-    work.sourceDocumentTitle = doc.title || doc.fileName;
-    await work.save();
-
-    // ── Download PDF ─────────────────────────────────────────────────────────
-    const buffer = await downloadFromS3(doc.s3Key);
-
-    const scope = `${inquiry.client} · ${inquiry.project} — ${inquiry.scope}`;
-
-    // ── Call Gemini ──────────────────────────────────────────────────────────
     const result = await extractTagList(
       buffer,
       doc.mimeType || 'application/pdf',
       inquiryId,
-      work.sourceDocumentTitle,
+      documentTitle,
       scope,
     );
 
     // ── Save results ─────────────────────────────────────────────────────────
-    work.tags            = result.tags;
-    work.extractionNotes = result.extractionNotes;
-    work.status          = 'done';
-    work.error           = '';
-    work.extractedAt     = new Date();
+    const work = await getOrCreate(inquiryId);
+    work.sourceDocumentId    = doc._id as mongoose.Types.ObjectId;
+    work.sourceDocumentTitle = documentTitle;
+    work.tags                = result.tags;
+    work.extractionNotes     = result.extractionNotes;
+    work.status              = 'done';
+    work.error               = '';
+    work.extractedAt         = new Date();
     await work.save();
 
     res.json({

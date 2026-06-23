@@ -33,7 +33,7 @@ const RESPONSE_SCHEMA = {
     sections: {
       type: Type.ARRAY,
       description:
-        'The 8 most commercially significant sections only (no more than 8). Skip boilerplate like definitions or general conditions.',
+        'Up to 8 sections covering: Scope of Supply, Equipment Tag List, Design Conditions, Codes & Standards, Material Specs, Inspection & Testing, Commercial Terms, Vendor Data Requirements. Include every section present in the document up to this limit.',
       items: {
         type: Type.OBJECT,
         properties: {
@@ -43,11 +43,11 @@ const RESPONSE_SCHEMA = {
           },
           content: {
             type: Type.STRING,
-            description: 'One sentence. State the single most important requirement. Under 25 words.',
+            description: 'Detailed extraction of the key requirements, conditions, and specifications from this section. 80-100 words.',
           },
           summary: {
             type: Type.STRING,
-            description: 'One sentence action item for the sales team. Under 20 words.',
+            description: 'Actionable summary for the sales/estimation team covering what to check, quote, or clarify. 80-100 words.',
           },
         },
         required: ['title', 'content', 'summary'],
@@ -83,193 +83,29 @@ export async function extractDocument(
   const ai = getClient();
 
   const prompt =
-    `Here is the full updated prompt that seamlessly combines your specific engineering persona, the strict extraction instructions, your dynamic variables (docType, inquiryId, and scope), and the complete JSON schema.
-
-You are a senior procurement and engineering document analyst with deep expertise in EPC projects, heat exchangers, pressure vessels, and industrial equipment RFQ packages.
-
-Analyze this ${docType} document for inquiry ${inquiryId} (scope: ${scope}). Read it entirely and extract EVERY piece of information available. Miss nothing. Be comprehensive, but follow the format strictly. Each extracted text value within the fields must be concise and summarized—never copy massive walls of raw text from the document verbatim.
-
-Return a single valid JSON object. No markdown. No explanation. No preamble. Only JSON.
-
-{
-"document_meta": {
-"document_number": "",
-"document_title": "",
-"revision": "",
-"date": "",
-"project_name": "",
-"project_number": "",
-"client": "",
-"contractor_epc": "",
-"unit_area": "",
-"department": "",
-"division": "",
-"prepared_by": "",
-"checked_by": "",
-"approved_by": "",
-"issued_for": "",
-"supplier_code": "",
-"supplier_name": "",
-"total_pages": ""
-},
-"table_of_contents": [
-{
-"document_number": "",
-"revision": "",
-"title": "",
-"page_number": ""
-}
-],
-"scope_of_supply": {
-"overall_description": "",
-"items": [
-{
-"sl_no": "",
-"tag_number": "",
-"description": "",
-"quantity": "",
-"unit": "",
-"delivery_location": ""
-}
-],
-"services_included": [],
-"exclusions": []
-},
-"technical_requirements": {
-"equipment_type": "",
-"applicable_codes_and_standards": [],
-"design_conditions": [
-{
-"tag": "",
-"shell_side": {
-"fluid": "",
-"operating_pressure": "",
-"design_pressure": "",
-"operating_temperature": "",
-"design_temperature": "",
-"flow_rate": "",
-"material": ""
-},
-"tube_side": {
-"fluid": "",
-"operating_pressure": "",
-"design_pressure": "",
-"operating_temperature": "",
-"design_temperature": "",
-"flow_rate": "",
-"material": ""
-},
-"heat_duty": "",
-"tema_class": "",
-"ibr_applicable": ""
-}
-],
-"material_specifications": [],
-"ndt_requirements": [],
-"pwht_requirements": "",
-"hydro_test_requirements": "",
-"pmi_requirements": "",
-"painting_and_coating": "",
-"insulation_requirements": "",
-"surface_preparation": "",
-"pickling_passivation": "",
-"tube_layout_guidelines": "",
-"special_technical_notes": []
-},
-"datasheets": [
-{
-"document_number": "",
-"tag_number": "",
-"title": "",
-"revision": "",
-"all_fields": {}
-}
-],
-"vendor_data_requirements": {
-"document_number": "",
-"revision": "",
-"submission_schedule": "",
-"required_documents": [
-{
-"document_type": "",
-"description": "",
-"copies": "",
-"stage": ""
-}
-]
-},
-"inspection_and_testing": {
-"itp_document_number": "",
-"itp_revision": "",
-"inspection_stages": [],
-"third_party_inspection": "",
-"client_witness_points": [],
-"hold_points": [],
-"review_points": []
-},
-"quality_requirements": {
-"qms_spec_reference": "",
-"quality_plan_required": "",
-"sub_vendor_control": "",
-"special_quality_clauses": []
-},
-"specifications_included": [
-{
-"spec_number": "",
-"revision": "",
-"title": "",
-"key_requirements": []
-}
-],
-"drawings_included": [
-{
-"drawing_number": "",
-"revision": "",
-"title": "",
-"type": ""
-}
-],
-"commercial_terms": {
-"bid_due_date": "",
-"delivery_period": "",
-"delivery_terms": "",
-"delivery_location": "",
-"payment_terms": "",
-"bid_validity_period": "",
-"currency": "",
-"price_basis": "",
-"taxes_and_duties": "",
-"liquidated_damages": "",
-"performance_bank_guarantee": "",
-"spare_parts_required": "",
-"special_tools_required": "",
-"packing_requirements": ""
-},
-"vendor_instructions": {
-"quote_basis": "",
-"conflict_resolution_order": [],
-"sub_vendor_approval_required": "",
-"fabrication_notes": [],
-"all_numbered_clauses": [
-{
-"clause_number": "",
-"clause_text": ""
-}
-]
-},
-"referenced_documents": [
-{
-"document_number": "",
-"title": "",
-"revision": ""
-}
-],
-"missing_documents_or_gaps": [],
-"critical_flags": []
-}`;
+    `You are a senior procurement and engineering document analyst with deep expertise in EPC projects, ` +
+    `heat exchangers, pressure vessels, and industrial equipment RFQ packages.\n\n` +
+    `Analyze this ${docType} document for inquiry ${inquiryId} (scope: ${scope}). ` +
+    `Read it fully. Extract EVERY commercially and technically significant piece of information. ` +
+    `Be comprehensive — miss nothing important. Summarize each value concisely; never paste raw walls of text verbatim.\n\n` +
+    `Return a JSON object with exactly three fields — overview, keyItems, sections — as described below.\n\n` +
+    `overview: Two to three sentences covering: what is being procured, by whom (client/EPC), ` +
+    `project reference, key design basis, and the single most critical commercial constraint (bid date, budget, delivery).\n\n` +
+    `keyItems: Exactly 6 bullet strings, each under 20 words. Cover the six most critical facts: ` +
+    `scope summary, TAG numbers and quantities, applicable codes/standards, key design conditions (pressure/temperature/material), ` +
+    `delivery period, and bid/payment terms.\n\n` +
+    `sections: Up to 8 sections capturing the most commercially significant content. ` +
+    `Include ALL of the following that are present in the document — do not skip any: ` +
+    `Scope of Supply, Equipment Tag List, Design Conditions & Datasheets, ` +
+    `Applicable Codes & Standards, Material Specifications, ` +
+    `Inspection & Testing Requirements, Commercial Terms (bid date / delivery / payment / LD), ` +
+    `Vendor Data Requirements, Quality Requirements, Referenced Documents, Critical Flags & Gaps. ` +
+    `For each section: title = exact section name (under 10 words); ` +
+    `content = detailed extraction of all key requirements, specs, conditions, and data points from that section — write 80 to 100 words, be thorough; ` +
+    `summary = actionable summary for the sales/estimation team covering what to verify, quote, or clarify — write 80 to 100 words.`;
 
   const stream = await ai.models.generateContentStream({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.1-flash-lite',
     contents: [
       {
         role: 'user',
@@ -282,7 +118,8 @@ Return a single valid JSON object. No markdown. No explanation. No preamble. Onl
     config: {
       responseMimeType: 'application/json',
       responseSchema:   RESPONSE_SCHEMA,
-      maxOutputTokens:  2048,
+      maxOutputTokens:  16000,
+      temperature: 0.7
     },
   });
 

@@ -134,7 +134,7 @@ Sign off contact as "[Contact Name] | Proposals Department | Oswal Engineering P
   const res = await ai.chat.completions.create({
     model: 'gpt-5.4',
     response_format: { type: 'json_object' },
-    max_tokens: 8192,
+    max_completion_tokens: 8192,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
