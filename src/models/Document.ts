@@ -16,7 +16,6 @@ export interface IDocument extends Document {
 
   // Storage
   s3Key: string;
-  s3Bucket: string;
   fileName: string;
   fileSize: number;
   mimeType: string;
@@ -52,9 +51,8 @@ const DocumentSchema = new Schema<IDocument>(
     rev:       { type: String, required: true },
     status:    { type: String, enum: ['read', 'open', 'queued'], required: true },
 
-    s3Key:      { type: String, default: '' },
-    s3Bucket:   { type: String, default: '' },
-    fileName:   { type: String, default: '' },
+    s3Key:    { type: String, default: '' },
+    fileName: { type: String, default: '' },
     fileSize:   { type: Number, default: 0 },
     mimeType:   { type: String, default: '' },
     uploadedBy: { type: String, default: 'system' },

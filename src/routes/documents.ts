@@ -133,7 +133,6 @@ router.post(
         rev,
         status,
         s3Key,
-        s3Bucket:   process.env.AWS_S3_BUCKET ?? '',
         fileName:   req.file.originalname,
         fileSize:   req.file.size,
         mimeType:   req.file.mimetype,
@@ -142,8 +141,8 @@ router.post(
 
       const presignedUrl = await getPresignedUrl(s3Key);
 
-      // Return public fields + presigned URL (strip s3Key/s3Bucket)
-      const { s3Key: _k, s3Bucket: _b, ...publicDoc } = doc.toObject();
+      // Return public fields + presigned URL (strip s3Key)
+      const { s3Key: _k, ...publicDoc } = doc.toObject();
       res.status(201).json({ ...publicDoc, presignedUrl, hasFile: true });
     } catch (err) {
       console.error('[documents] upload error:', err);
