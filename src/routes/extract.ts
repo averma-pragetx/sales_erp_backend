@@ -19,8 +19,11 @@ async function runPipeline(docId: string): Promise<void> {
     doc.processingError  = '';
     await doc.save();
 
-    // 1. Download file from S3
-    const buffer = await downloadFromS3(doc.s3Key);
+    // 1. Download file from S3, convert to base64, then drop the buffer
+    //    so it can be GC'd before the Gemini network call begins
+    let buffer: Buffer | null = await downloadFromS3(doc.s3Key);
+    const base64Data = buffer.toString('base64');
+    buffer = null;
 
     // 2. Resolve inquiry scope for a richer Gemini prompt
     const inquiry = await Inquiry.findOne({ inquiryId: doc.inquiryId }).lean();
@@ -30,7 +33,7 @@ async function runPipeline(docId: string): Promise<void> {
 
     // 3. Single Gemini call: extract + summarise
     const result = await extractDocument(
-      buffer,
+      base64Data,
       doc.mimeType || 'application/pdf',
       doc.docType,
       scope,
@@ -167,8 +170,10 @@ router.post('/inquiry/:inquiryId', async (req: Request, res: Response) => {
       );
     }
 
-    // Run all pipelines concurrently, await all to finish
-    await Promise.all(pending.map(doc => runPipeline(String(doc._id))));
+    // Run sequentially to avoid holding multiple PDF buffers in memory at once
+    for (const doc of pending) {
+      await runPipeline(String(doc._id));
+    }
 
     // Return updated documents with extraction results
     const docs = await Doc.find({ inquiryId, s3Key: { $ne: '' } })

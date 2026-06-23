@@ -7,7 +7,12 @@ export async function connectDB(): Promise<void> {
   }
 
   try {
-    await mongoose.connect(uri);
+    await mongoose.connect(uri, {
+      maxPoolSize:              3,     // free instance has limited RAM; default is 5
+      serverSelectionTimeoutMS: 5000,  // fail fast if Atlas is unreachable
+      socketTimeoutMS:          45000, // drop stale sockets after 45s
+      bufferCommands:           false, // throw immediately if disconnected rather than queuing
+    });
     console.log('MongoDB connected successfully');
   } catch (error) {
     console.error('MongoDB connection error:', error);

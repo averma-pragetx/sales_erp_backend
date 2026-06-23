@@ -2,14 +2,20 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Readable } from 'stream';
 
+// Singleton — one client per process, not one per request
+let _client: S3Client | null = null;
+
 function getClient(): S3Client {
-  return new S3Client({
-    region: process.env.AWS_REGION ?? 'ap-south-1',
-    credentials: {
-      accessKeyId:     process.env.AWS_ACCESS_KEY_ID     ?? '',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-    },
-  });
+  if (!_client) {
+    _client = new S3Client({
+      region: process.env.AWS_REGION ?? 'ap-south-1',
+      credentials: {
+        accessKeyId:     process.env.AWS_ACCESS_KEY_ID     ?? '',
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
+      },
+    });
+  }
+  return _client;
 }
 
 function getBucket(): string {

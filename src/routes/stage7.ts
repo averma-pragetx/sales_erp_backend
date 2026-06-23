@@ -33,7 +33,7 @@ function formatBom(work: InstanceType<typeof Stage7Work>) {
       aiEstimated:  item.aiEstimated,
       rationale:    item.rationale,
       confidence:   item.confidence,
-      moc:          item.moc,
+      mocType:          item.mocType,
       notes:        item.notes,
       remarks:      item.remarks,
     })),
@@ -123,7 +123,7 @@ router.post('/:inquiryId/estimate', async (req: Request, res: Response) => {
       aiEstimated:  true,
       rationale:    p.rationale,
       confidence:   p.confidence,
-      moc:          p.moc,
+      mocType:          p.mocType,
       notes:        '',
       remarks:      '',
     }));
@@ -154,13 +154,13 @@ router.post('/:inquiryId/items', async (req: Request, res: Response) => {
   try {
     const inquiryId = decodeURIComponent(req.params.inquiryId);
 
-    const { productName, quantity, quantityUnit, rateInr, tagNumber, moc, notes, remarks } = req.body as {
+    const { productName, quantity, quantityUnit, rateInr, tagNumber, mocType, notes, remarks } = req.body as {
       productName:   string;
       quantity:      number;
       quantityUnit?: string;
       rateInr:       number;
       tagNumber?:    string;
-      moc?:          string;
+      mocType?:          string;
       notes?:        string;
       remarks?:      string;
     };
@@ -194,7 +194,7 @@ router.post('/:inquiryId/items', async (req: Request, res: Response) => {
       aiEstimated:  false,
       rationale:    '',
       confidence:   'manual',
-      moc:          (moc ?? '').trim(),
+      mocType:          (mocType ?? '').trim(),
       notes:        (notes ?? '').trim(),
       remarks:      (remarks ?? '').trim(),
     });
@@ -233,13 +233,13 @@ router.patch('/:inquiryId/items/:itemId', async (req: Request, res: Response) =>
       return;
     }
 
-    const { productName, quantity, quantityUnit, rateInr, tagNumber, moc, notes, remarks } = req.body as {
+    const { productName, quantity, quantityUnit, rateInr, tagNumber, mocType, notes, remarks } = req.body as {
       productName?:  string;
       quantity?:     number;
       quantityUnit?: string;
       rateInr?:      number;
       tagNumber?:    string;
-      moc?:          string;
+      mocType?:          string;
       notes?:        string;
       remarks?:      string;
     };
@@ -247,7 +247,7 @@ router.patch('/:inquiryId/items/:itemId', async (req: Request, res: Response) =>
     if (productName  !== undefined) item.productName  = productName.trim();
     if (tagNumber    !== undefined) item.tagNumber    = tagNumber.trim();
     if (quantityUnit !== undefined) item.quantityUnit = quantityUnit.trim();
-    if (moc          !== undefined) item.moc          = moc.trim();
+    if (mocType          !== undefined) item.mocType          = mocType.trim();
     if (notes        !== undefined) item.notes        = notes.trim();
     if (remarks      !== undefined) item.remarks      = remarks.trim();
 
