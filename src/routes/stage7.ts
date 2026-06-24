@@ -108,14 +108,23 @@ router.post('/:inquiryId/estimate', async (req: Request, res: Response) => {
     const result = await estimateBom(
       inquiryId,
       scope,
-      stage4.tags.map(t => ({
-        tagNumber:     t.tagNumber,
-        productName:   t.productName,
-        dimensions:    t.dimensions,
-        weightPerUnit: t.weightPerUnit,
-        quantity:      t.quantity,
-        notes:         t.notes,
-      })),
+      stage4.tags.map(t => {
+        const dimParts = [t.shellOdMm ? `${t.shellOdMm}mm OD` : '', t.tubeLengthMm ? `${t.tubeLengthMm}mm L` : ''].filter(Boolean);
+        const notesParts = [
+          t.temaType ? `TEMA: ${t.temaType}` : '',
+          t.shellSide?.fluid ? `Shell: ${t.shellSide.fluid}` : '',
+          t.tubeSide?.fluid  ? `Tube: ${t.tubeSide.fluid}`   : '',
+          t.shellSide?.material ? `Shell mat: ${t.shellSide.material}` : '',
+        ].filter(Boolean);
+        return {
+          tagNumber:     t.tagNumber,
+          productName:   t.service || t.tagNumber || `Item`,
+          dimensions:    dimParts.join(' × ') || 'not specified',
+          weightPerUnit: t.weightPerUnitT ? `${t.weightPerUnitT} t` : 'not specified',
+          quantity:      String(t.nos || 1),
+          notes:         notesParts.join(' | '),
+        };
+      }),
     );
 
     // ── Save BOM items ────────────────────────────────────────────────────────

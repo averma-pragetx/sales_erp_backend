@@ -78,6 +78,7 @@ router.post('/:inquiryId/extract', async (req: Request, res: Response) => {
     work.sourceDocumentId    = doc._id as mongoose.Types.ObjectId;
     work.sourceDocumentTitle = documentTitle;
     work.tags                = result.tags;
+    work.extractionMeta      = result.extractionMeta;
     work.extractionNotes     = result.extractionNotes;
     work.status              = 'done';
     work.error               = '';
@@ -91,6 +92,7 @@ router.post('/:inquiryId/extract', async (req: Request, res: Response) => {
       status:              work.status,
       extractedAt:         work.extractedAt,
       extractionNotes:     work.extractionNotes,
+      extractionMeta:      work.extractionMeta,
       tags:                work.tags,
     });
   } catch (err) {
@@ -139,6 +141,7 @@ router.get('/:inquiryId', async (req: Request, res: Response) => {
       error:               work.error || undefined,
       extractedAt:         work.extractedAt,
       extractionNotes:     work.extractionNotes,
+      extractionMeta:      work.extractionMeta,
       tags:                work.tags,
     });
   } catch (err) {

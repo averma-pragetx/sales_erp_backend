@@ -1,13 +1,42 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export interface IShellTubeSide {
+  fluid:                  string;
+  operatingPressureBarg:  number;
+  designPressureBarg:     number;
+  operatingTempC:         number;
+  designTempC:            number;
+  material:               string;
+}
+
 export interface ITagItem {
-  tagNumber:     string;   // TAG / serial / model number; "not specified" if absent
-  productName:   string;   // Equipment description; "not specified" if absent
-  dimensions:    string;   // e.g. "ID 600mm × L 3000mm"; "not specified" if absent
-  weightPerUnit: string;   // e.g. "850 kg"; "not specified" if absent
-  quantity:      string;   // e.g. "4" or "4 nos"; "not specified" if absent
-  notes:         string;   // Any extra text from the row (material, service, etc.)
-  missingFields: string[]; // Field names that were explicitly not found
+  tagNumber:       string;
+  service:         string;
+  temaType:        string;
+  shellOdMm:       number;
+  tubeLengthMm:    number;
+  nos:             number;
+  shellSide:       IShellTubeSide;
+  tubeSide:        IShellTubeSide;
+  weightPerUnitT:  number;
+  totalWeightT:    number;
+  datasheetRef:    string;
+  datasheetRev:    string;
+  ltcs:            boolean;
+  ibr:             boolean;
+  pwht:            boolean;
+  ndeRequirements: string[];
+  deviations:      string[];
+  openItems:       string[];
+  specialNotes:    string[];
+}
+
+export interface IExtractionMeta {
+  sourceDocuments:         string[];
+  totalTagsFound:          number;
+  totalUnits:              number;
+  ltcsItemCount:           number;
+  totalFabricationWeightT: number;
 }
 
 export interface IStage4Work extends Document {
@@ -15,7 +44,8 @@ export interface IStage4Work extends Document {
   sourceDocumentId:     mongoose.Types.ObjectId | null;
   sourceDocumentTitle:  string;
   tags:                 ITagItem[];
-  extractionNotes:      string;  // Gemini's commentary on extraction quality
+  extractionMeta:       IExtractionMeta;
+  extractionNotes:      string;
   status:               'pending' | 'processing' | 'done' | 'failed';
   error:                string;
   extractedAt:          Date | null;
@@ -23,15 +53,50 @@ export interface IStage4Work extends Document {
   updatedAt:            Date;
 }
 
+const ShellTubeSideSchema = new Schema<IShellTubeSide>(
+  {
+    fluid:                 { type: String, default: '' },
+    operatingPressureBarg: { type: Number, default: 0 },
+    designPressureBarg:    { type: Number, default: 0 },
+    operatingTempC:        { type: Number, default: 0 },
+    designTempC:           { type: Number, default: 0 },
+    material:              { type: String, default: '' },
+  },
+  { _id: false },
+);
+
 const TagItemSchema = new Schema<ITagItem>(
   {
-    tagNumber:     { type: String, default: 'not specified' },
-    productName:   { type: String, default: 'not specified' },
-    dimensions:    { type: String, default: 'not specified' },
-    weightPerUnit: { type: String, default: 'not specified' },
-    quantity:      { type: String, default: 'not specified' },
-    notes:         { type: String, default: '' },
-    missingFields: { type: [String], default: [] },
+    tagNumber:       { type: String, default: '' },
+    service:         { type: String, default: '' },
+    temaType:        { type: String, default: '' },
+    shellOdMm:       { type: Number, default: 0 },
+    tubeLengthMm:    { type: Number, default: 0 },
+    nos:             { type: Number, default: 1 },
+    shellSide:       { type: ShellTubeSideSchema, default: () => ({}) },
+    tubeSide:        { type: ShellTubeSideSchema, default: () => ({}) },
+    weightPerUnitT:  { type: Number, default: 0 },
+    totalWeightT:    { type: Number, default: 0 },
+    datasheetRef:    { type: String, default: '' },
+    datasheetRev:    { type: String, default: '' },
+    ltcs:            { type: Boolean, default: false },
+    ibr:             { type: Boolean, default: false },
+    pwht:            { type: Boolean, default: false },
+    ndeRequirements: { type: [String], default: [] },
+    deviations:      { type: [String], default: [] },
+    openItems:       { type: [String], default: [] },
+    specialNotes:    { type: [String], default: [] },
+  },
+  { _id: false },
+);
+
+const ExtractionMetaSchema = new Schema<IExtractionMeta>(
+  {
+    sourceDocuments:         { type: [String], default: [] },
+    totalTagsFound:          { type: Number, default: 0 },
+    totalUnits:              { type: Number, default: 0 },
+    ltcsItemCount:           { type: Number, default: 0 },
+    totalFabricationWeightT: { type: Number, default: 0 },
   },
   { _id: false },
 );
@@ -42,6 +107,7 @@ const Stage4WorkSchema = new Schema<IStage4Work>(
     sourceDocumentId:    { type: Schema.Types.ObjectId, ref: 'Doc', default: null },
     sourceDocumentTitle: { type: String, default: '' },
     tags:                { type: [TagItemSchema], default: [] },
+    extractionMeta:      { type: ExtractionMetaSchema, default: () => ({}) },
     extractionNotes:     { type: String, default: '' },
     status:              { type: String, enum: ['pending', 'processing', 'done', 'failed'], default: 'pending' },
     error:               { type: String, default: '' },

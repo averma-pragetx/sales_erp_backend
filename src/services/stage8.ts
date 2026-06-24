@@ -62,11 +62,12 @@ export async function draftProposal(inquiryId: string): Promise<ProposalResult> 
     : '(No RFQ sections extracted yet — base proposal on enquiry scope and tag list.)';
 
   const tagsBlock = (stage4?.status === 'done' && stage4.tags.length > 0)
-    ? stage4.tags.map((t, i) =>
-      `${String(i + 1).padStart(2, '0')}. TAG: ${t.tagNumber} | Product: ${t.productName} | ` +
-      `Qty: ${t.quantity} | Dimensions: ${t.dimensions} | Wt/unit: ${t.weightPerUnit}` +
-      (t.notes ? ` | Notes: ${t.notes}` : '')
-    ).join('\n')
+    ? stage4.tags.map((t, i) => {
+        const dim = [t.shellOdMm ? `${t.shellOdMm}mm OD` : '', t.tubeLengthMm ? `${t.tubeLengthMm}mm L` : ''].filter(Boolean).join(' × ') || '—';
+        return `${String(i + 1).padStart(2, '0')}. TAG: ${t.tagNumber} | Service: ${t.service} | TEMA: ${t.temaType} | ` +
+          `Dim: ${dim} | Shell: ${t.shellSide?.fluid ?? '—'} | Tube: ${t.tubeSide?.fluid ?? '—'} | ` +
+          `Wt/unit: ${t.weightPerUnitT ? t.weightPerUnitT + ' t' : '—'} | Nos: ${t.nos}`;
+      }).join('\n')
     : '(Tag list not yet extracted — include a placeholder equipment schedule.)';
 
   const gapBlock = (stage3?.gapAnalysis?.status === 'done')
