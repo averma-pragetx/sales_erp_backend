@@ -105,7 +105,7 @@ export async function extractDocument(
     `summary = actionable summary for the sales/estimation team covering what to verify, quote, or clarify — write 80 to 100 words.`;
 
   const stream = await ai.models.generateContentStream({
-    model: 'gemini-3.1-flash-lite',
+    model: 'gemini-3-flash-preview',
     contents: [
       {
         role: 'user',
