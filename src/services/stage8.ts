@@ -88,16 +88,17 @@ export async function draftProposal(inquiryId: string): Promise<ProposalResult> 
     ).join('\n\n')
     : '(No answered technical queries — state "No technical deviations or clarifications at this stage.")';
 
-  const bomBlock = (bom?.status === 'done' && bom.items.length > 0)
-    ? [
-      bom.items.map((item, i) =>
-        `${String(i + 1).padStart(2, '0')}. TAG: ${item.tagNumber || '—'} | ` +
-        `${item.productName} | Qty: ${item.quantity} ${item.quantityUnit} | ` +
-        `Unit Rate: ${inr(item.rateInr)} | Total: ${inr(item.totalInr)}`
-      ).join('\n'),
-      `\nGrand Total (ex-GST): ${inr(bom.grandTotalInr)}`,
-    ].join('\n')
-    : '(BOM not yet estimated — include a placeholder pricing table with TBD values.)';
+  const bomBlock = (bom?.status === 'done' && bom.equipment?.length > 0)
+    ? bom.equipment.map((eq: { tagNo?: string; service?: string; temaClass?: string; designPressureShell?: string; designPressureTube?: string; designTempShellC?: number; designTempTubeC?: number; ibrApplicable?: boolean; hydrogenService?: boolean; deletedFromScope?: boolean; bom?: { applicable?: string; srNo?: string; component?: string; moc?: string | null; mocFlag?: string | null; weightKg?: number | null }[] }, i: number) => {
+        const flags = [eq.ibrApplicable ? 'IBR' : '', eq.hydrogenService ? 'H2' : '', eq.deletedFromScope ? 'DELETED' : ''].filter(Boolean).join(', ');
+        const header = `${String(i + 1).padStart(2, '0')}. TAG: ${eq.tagNo} | ${eq.service} | TEMA ${eq.temaClass}` + (flags ? ` | ${flags}` : '');
+        const components = (eq.bom ?? []).filter((c: { applicable?: string }) => c.applicable !== 'No')
+          .map((c: { srNo?: string; component?: string; moc?: string | null; mocFlag?: string | null; weightKg?: number | null }) =>
+            `    • ${c.component}: ${c.moc ?? '[MOC NOT STATED]'}${c.mocFlag ? ' ⚠ ' + c.mocFlag : ''}${c.weightKg != null ? ' (' + c.weightKg + ' kg)' : ''}`
+          ).join('\n');
+        return header + (components ? '\n' + components : '');
+      }).join('\n\n')
+    : '(BOM not yet extracted — include a placeholder materials list with TBD values.)';
 
   const systemPrompt =
     `You are a senior proposals engineer at Oswal Engineering (OEL), a leading Indian industrial ` +
