@@ -98,14 +98,16 @@ router.patch('/:sectionId', async (req: Request, res: Response) => {
       return;
     }
 
-    const { summary, title, reviewDecision, reviewNote } = req.body as {
+    const { summary, content, title, reviewDecision, reviewNote } = req.body as {
       summary?: string;
+      content?: string;
       title?: string;
       reviewDecision?: 'pending' | 'ok' | 'flagged' | 'issue';
       reviewNote?: string;
     };
     const fields: Record<string, string> = {};
     if (summary        !== undefined) fields.summary        = summary;
+    if (content        !== undefined) fields.content        = content;
     if (title          !== undefined) fields.title          = title;
     if (reviewNote     !== undefined) fields.reviewNote     = reviewNote;
     if (reviewDecision !== undefined) {
@@ -118,7 +120,7 @@ router.patch('/:sectionId', async (req: Request, res: Response) => {
     }
 
     if (Object.keys(fields).length === 0) {
-      res.status(400).json({ error: 'Provide at least one of: summary, title, reviewDecision, reviewNote.' });
+      res.status(400).json({ error: 'Provide at least one of: summary, content, title, reviewDecision, reviewNote.' });
       return;
     }
 

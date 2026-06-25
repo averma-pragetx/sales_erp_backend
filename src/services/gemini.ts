@@ -43,11 +43,11 @@ const RESPONSE_SCHEMA = {
           },
           content: {
             type: Type.STRING,
-            description: 'Detailed extraction of the key requirements, conditions, and specifications from this section. 80-100 words.',
+            description: 'Full detailed extraction of all requirements, conditions, specifications, and data points from this section. 100-200 words. Be thorough — include every number, clause, and condition.',
           },
           summary: {
             type: Type.STRING,
-            description: 'Actionable summary for the sales/estimation team covering what to check, quote, or clarify. 80-100 words.',
+            description: 'One sentence (under 20 words) stating what this section covers and its single most important requirement. No lists.',
           },
         },
         required: ['title', 'content', 'summary'],
@@ -101,8 +101,8 @@ export async function extractDocument(
     `Inspection & Testing Requirements, Commercial Terms (bid date / delivery / payment / LD), ` +
     `Vendor Data Requirements, Quality Requirements, Referenced Documents, Critical Flags & Gaps. ` +
     `For each section: title = exact section name (under 10 words); ` +
-    `content = detailed extraction of all key requirements, specs, conditions, and data points from that section — write 80 to 100 words, be thorough; ` +
-    `summary = actionable summary for the sales/estimation team covering what to verify, quote, or clarify — write 80 to 100 words.`;
+    `content = full detailed extraction of every requirement, spec, condition, data point, clause reference, and numeric value from that section — write 100 to 200 words, be thorough and miss nothing; ` +
+    `summary = one sentence under 20 words stating what the section covers and its single most critical requirement. No bullet points or lists in summary.`;
 
   const stream = await ai.models.generateContentStream({
     model: 'gemini-3-flash-preview',
