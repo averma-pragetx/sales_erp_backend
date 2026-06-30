@@ -5,6 +5,7 @@ import { Inquiry }     from '../models/Inquiry';
 import { Doc }         from '../models/Document';
 import { downloadFromS3 } from '../s3';
 import { extractBom }  from '../services/stage7';
+import { applyEquipmentCosts } from '../services/costEstimation';
 
 const router = Router();
 
@@ -83,7 +84,7 @@ router.post('/:inquiryId/extract', async (req: Request, res: Response) => {
     const result = await extractBom(buffer, doc.mimeType || 'application/pdf', inquiryId, scope, stage4Context);
 
     work.projectInfo = result.projectInfo;
-    work.equipment   = result.equipment;
+    work.equipment   = applyEquipmentCosts(result.equipment) as typeof work.equipment;
     work.status      = 'done';
     work.extractedAt = new Date();
     work.error       = '';
@@ -98,6 +99,25 @@ router.post('/:inquiryId/extract', async (req: Request, res: Response) => {
       if (work) { work.status = 'failed'; work.error = String(err); await work.save(); }
     } catch { /* ignore */ }
     res.status(500).json({ error: 'BOM extraction failed.', details: String(err) });
+  }
+});
+
+// ─── POST /api/stage7/:inquiryId/estimate-cost ───────────────────────────────
+
+router.post('/:inquiryId/estimate-cost', async (req: Request, res: Response) => {
+  try {
+    const inquiryId = decodeURIComponent(req.params.inquiryId);
+    const work = await Stage7Work.findOne({ inquiryId });
+    if (!work || work.status !== 'done') {
+      res.status(422).json({ error: 'BOM extraction must be completed first.' });
+      return;
+    }
+    work.equipment = applyEquipmentCosts(work.equipment) as typeof work.equipment;
+    await work.save();
+    res.json(formatWork(work));
+  } catch (err) {
+    console.error('[stage7] estimate-cost error:', err);
+    res.status(500).json({ error: 'Cost estimation failed.', details: String(err) });
   }
 });
 

@@ -16,89 +16,417 @@ function getClient(): GoogleGenAI {
 
 // ─── System prompt (from step6_BOM.md) ───────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are a mechanical estimator specialising in shell & tube heat exchangers.
+const SYSTEM_PROMPT = `You are a senior Mechanical Equipment Engineer and Estimation Specialist with expertise in:
 
-A Purchase Requisition (PR) PDF is provided. Extract a complete Bill of Materials (BOM) from ALL datasheets in the document (each tag number has multiple sheets — Sht.1, Sht.2, Sht.3). Read every mechanical details table, nozzle schedule, and notes section carefully.
+- Shell & Tube Heat Exchangers
+- TEMA Standards
+- Mechanical Datasheets
+- Material Requisitions
+- Equipment Procurement Packages
+- Bill of Materials (BOM) Extraction
+- Nozzle Schedule Interpretation
 
-Return ONLY valid JSON. No explanation, no markdown fences.
+A Purchase Requisition (PR) PDF has been provided.
 
-OUTPUT SCHEMA:
+The document may contain multiple equipment tags.
+
+Each equipment tag may span multiple datasheet sheets including:
+
+- Sht.1
+- Sht.2
+- Sht.3
+- Additional continuation sheets
+
+You MUST review ALL sheets belonging to a tag before extracting data.
+
+==================================================
+PRIMARY OBJECTIVE
+==================================================
+
+For EACH equipment tag:
+
+1. Identify the equipment.
+2. Extract the COMPLETE BOM.
+3. Extract the COMPLETE Nozzle Schedule.
+4. Maintain source traceability.
+
+Accuracy is more important than completeness.
+
+Never invent values.
+
+Never estimate values.
+
+==================================================
+OUTPUT REQUIREMENTS
+==================================================
+
+Return ONLY valid JSON.
+
+Do NOT return:
+
+- Markdown
+- Explanations
+- Notes
+- Comments
+- Code fences
+
+Output must be parseable by JSON.parse() without modification.
+
+==================================================
+OUTPUT SCHEMA
+==================================================
+
 {
   "project": {
-    "name": string,
-    "job_no": string,
-    "client": string,
-    "consultant": string,
-    "pr_number": string,
-    "revision": string,
-    "date": string
+    "name": string | null,
+    "job_no": string | null,
+    "client": string | null,
+    "consultant": string | null,
+    "pr_number": string | null,
+    "revision": string | null,
+    "date": string | null
   },
+
   "equipment": [
     {
       "tag_no": string,
-      "service": string,
-      "tema_class": string,
-      "exchanger_type": string,
-      "size_id_mm": number,
-      "size_sl_mm": number,
-      "no_of_shells": number,
-      "no_of_passes_shell": number,
-      "no_of_passes_tube": number,
-      "design_pressure_shell": string,
-      "design_pressure_tube": string,
-      "design_temp_shell_C": number,
-      "design_temp_tube_C": number,
-      "fluid_shell": string,
-      "fluid_tube": string,
-      "corrosion_allowance_shell_mm": number,
-      "corrosion_allowance_tube_mm": number,
-      "stress_relieving": string,
-      "radiography": string,
-      "bundle_weight_kg": number | null,
-      "empty_weight_kg": number | null,
-      "full_water_weight_kg": number | null,
+
+      "service": string | null,
+
       "deleted_from_scope": boolean,
+
       "ibr_applicable": boolean,
+
       "hydrogen_service": boolean,
+
       "bom": [
         {
-          "sr_no": string,
+          "sr_no": string | null,
+
           "component": string,
+
           "applicable": "Yes" | "No",
+
           "moc": string | null,
-          "moc_source": "datasheet" | "inferred" | "not_found",
+
+          "moc_source":
+            "datasheet" |
+            "inferred" |
+            "not_found",
+
           "moc_flag": string | null,
+
           "type_detail": string | null,
-          "remarks": string,
+
           "weight_kg": number | null,
-          "quantity": string,
-          "unit": string
+
+          "quantity": string | null,
+
+          "unit": string | null,
+
+          "source_page": number | null,
+
+          "source_sheet": string | null,
+
+          "remarks": string
         }
       ],
+
       "nozzle_schedule": [
         {
-          "mark": string,
-          "size_nps": string,
-          "asme_class": string,
-          "schedule": string,
-          "facing": string,
-          "designation": string,
+          "mark": string | null,
+
+          "size_nps": string | null,
+
+          "asme_class": string | null,
+
+          "schedule": string | null,
+
+          "facing": string | null,
+
+          "designation": string | null,
+
           "moc_neck": string | null,
+
           "moc_flange": string | null,
-          "moc_flag": string | null
+
+          "moc_flag": string | null,
+
+          "source_page": number | null,
+
+          "source_sheet": string | null
         }
       ]
     }
   ]
 }
 
-EXTRACTION RULES:
-1. MOC — Read the full mechanical details table. For each component: if clearly stated set moc_source="datasheet"; if ambiguous set moc_source="inferred" with moc_flag warning; if blank set moc=null, moc_source="not_found", moc_flag="NOT STATED IN DOCUMENT — obtain from MSD before procurement". NEVER leave moc_flag null when moc is null or inferred.
-2. Weights — Extract from Wt(Kg) column. If blank, use null — do NOT estimate.
-3. Nozzles — Extract every row from the nozzle schedule on Sht.1.
-4. Multiple tags — Process each tag as a separate equipment object.
-5. Scope flags — deleted_from_scope=true if tag explicitly deleted; ibr_applicable=true if IBR noted; hydrogen_service=true if H2 service noted.
-6. Accuracy — Do NOT invent values. If a field is not found, use null and note in remarks.`;
+==================================================
+DOCUMENT PROCESSING RULES
+==================================================
+
+1. Process the ENTIRE document.
+
+2. Identify every equipment tag.
+
+3. Treat every tag as a separate equipment object.
+
+4. Never merge data from different tags.
+
+5. Review ALL sheets belonging to a tag before generating output.
+
+6. Information may be distributed across multiple sheets.
+
+7. Do not assume a value is missing until all sheets for that tag have been reviewed.
+
+==================================================
+BOM EXTRACTION RULES
+==================================================
+
+This is the highest priority task.
+
+Extract EVERY row from the Mechanical Details table.
+
+Do NOT skip rows because:
+
+- Applicable = No
+- Weight missing
+- Quantity missing
+- MOC missing
+- Component appears unimportant
+
+If a row exists in the datasheet, it MUST appear in the output.
+
+Examples include but are not limited to:
+
+- Shell
+- Channel
+- Channel Cover
+- Tubesheet
+- Tubes
+- Floating Head
+- Floating Head Cover
+- Baffles
+- Support Plates
+- Tie Rods
+- Spacers
+- Impingement Plate
+- Pass Partition Plate
+- Saddle
+- Expansion Joint
+- Gasket
+- Bolting
+- Lifting Lug
+- Any other listed component
+
+Never create BOM rows that do not exist.
+
+Never omit BOM rows that do exist.
+
+==================================================
+MOC EXTRACTION RULES
+==================================================
+
+For every BOM component:
+
+STEP 1:
+Search Mechanical Details table.
+
+STEP 2:
+Search Material of Construction table.
+
+STEP 3:
+Search Notes.
+
+STEP 4:
+Search continuation sheets.
+
+STEP 5:
+Match BOM component against MOC entries.
+
+If explicit MOC exists:
+
+moc_source = "datasheet"
+
+If MOC is inferred from a clearly corresponding entry:
+
+moc_source = "inferred"
+
+moc_flag must explain the inference.
+
+If MOC is not available:
+
+moc = null
+
+moc_source = "not_found"
+
+moc_flag =
+"NOT STATED IN DOCUMENT - VERIFY FROM MATERIAL REQUISITION OR VENDOR DOCUMENTATION"
+
+Never leave moc_flag null when:
+
+- moc_source = "inferred"
+- moc_source = "not_found"
+
+==================================================
+WEIGHT RULES
+==================================================
+
+Extract only from actual weight columns.
+
+Examples:
+
+- Wt(Kg)
+- Weight(Kg)
+- Weight
+
+If weight is absent:
+
+weight_kg = null
+
+Do not calculate.
+
+Do not estimate.
+
+==================================================
+QUANTITY RULES
+==================================================
+
+Extract exactly as written.
+
+Examples:
+
+1
+2
+4
+AR
+AS REQD
+N/A
+
+Do not modify.
+
+Do not calculate.
+
+==================================================
+TYPE DETAIL RULES
+==================================================
+
+Extract descriptions exactly as written.
+
+Examples:
+
+- Integral Forged
+- Packed Floating Head
+- U-Tube Bundle
+- Floating Tube Sheet
+
+Do not summarize.
+
+Do not infer.
+
+==================================================
+NOZZLE SCHEDULE RULES
+==================================================
+
+Locate the complete Nozzle Schedule table.
+
+Usually found on Sht.1.
+
+Extract EVERY row.
+
+Create ONE nozzle object per row.
+
+Do not merge rows.
+
+Do not skip rows.
+
+Extract exactly as written:
+
+- Nozzle Mark
+- Size
+- Class
+- Schedule
+- Facing
+- Designation
+- MOC Neck
+- MOC Flange
+
+Preserve original values exactly.
+
+If a field is blank:
+
+set null.
+
+Do not infer missing nozzle values.
+
+==================================================
+SOURCE TRACEABILITY RULES
+==================================================
+
+For every BOM row:
+
+populate:
+
+- source_page
+- source_sheet
+
+For every nozzle row:
+
+populate:
+
+- source_page
+- source_sheet
+
+This information is mandatory whenever available.
+
+==================================================
+SCOPE RULES
+==================================================
+
+deleted_from_scope = true
+
+ONLY if explicitly stated.
+
+Examples:
+
+- Deleted
+- Removed from Scope
+- Not in Vendor Scope
+
+Otherwise false.
+
+ibr_applicable = true
+
+ONLY if IBR applicability is explicitly stated.
+
+Otherwise false.
+
+hydrogen_service = true
+
+ONLY if hydrogen service is explicitly stated.
+
+Otherwise false.
+
+==================================================
+FINAL VALIDATION
+==================================================
+
+Before returning the JSON:
+
+1. Verify every equipment tag has been processed.
+
+2. Verify every BOM row from the datasheet exists in output.
+
+3. Verify every nozzle row from the nozzle schedule exists in output.
+
+4. Verify all missing values are null.
+
+5. Verify no values were estimated.
+
+6. Verify output is valid JSON.
+
+Return ONLY the JSON.`;
+
 
 function buildUserPrompt(inquiryId: string, scope: string, stage4Context: string): string {
   return [
@@ -139,9 +467,14 @@ function normComp(raw: Record<string, unknown>): IBomComponent {
     mocFlag:    rawFlag || (moc === null ? 'NOT STATED IN DOCUMENT — obtain from MSD before procurement' : null),
     typeDetail: str(raw.type_detail) || null,
     remarks:    str(raw.remarks),
-    weightKg:   numOrNull(raw.weight_kg),
-    quantity:   str(raw.quantity),
-    unit:       str(raw.unit),
+    weightKg:        numOrNull(raw.weight_kg),
+    quantity:        str(raw.quantity),
+    unit:            str(raw.unit),
+    unitCostPerKg:   null,
+    materialCost:    null,
+    fabricationCost: null,
+    totalCost:       null,
+    costBasis:       null,
   };
 }
 
@@ -156,6 +489,8 @@ function normNozzle(raw: Record<string, unknown>): INozzle {
     mocNeck:     str(raw.moc_neck) || null,
     mocFlange:   str(raw.moc_flange) || null,
     mocFlag:     str(raw.moc_flag) || null,
+    totalCost:   null,
+    costBasis:   null,
   };
 }
 
@@ -186,8 +521,14 @@ function normEquipment(raw: Record<string, unknown>): IEquipmentBom {
     deletedFromScope:          bool(raw.deleted_from_scope),
     ibrApplicable:             bool(raw.ibr_applicable),
     hydrogenService:           bool(raw.hydrogen_service),
-    bom:            Array.isArray(raw.bom) ? (raw.bom as Record<string, unknown>[]).map(normComp) : [],
-    nozzleSchedule: Array.isArray(raw.nozzle_schedule) ? (raw.nozzle_schedule as Record<string, unknown>[]).map(normNozzle) : [],
+    bom:                  Array.isArray(raw.bom) ? (raw.bom as Record<string, unknown>[]).map(normComp) : [],
+    nozzleSchedule:       Array.isArray(raw.nozzle_schedule) ? (raw.nozzle_schedule as Record<string, unknown>[]).map(normNozzle) : [],
+    totalMaterialCost:    null,
+    totalFabricationCost: null,
+    totalNozzleCost:      null,
+    specialCost:          null,
+    inspectionCost:       null,
+    totalEquipCost:       null,
   };
 }
 
@@ -237,20 +578,20 @@ export async function extractBom(
     systemInstruction: SYSTEM_PROMPT,
     responseMimeType:  'application/json' as const,
     maxOutputTokens:   65536,
-    temperature:       0,
+    temperature:       0.1,
   };
 
   let rawJson = '';
   if (docText.length > 200) {
     const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       config: cfg,
       contents: [{ role: 'user', parts: [{ text: `${userPrompt}\n\nDOCUMENT TEXT:\n${docText}` }] }],
     });
     rawJson = result.text ?? '';
   } else {
     const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       config: cfg,
       contents: [{
         role: 'user',

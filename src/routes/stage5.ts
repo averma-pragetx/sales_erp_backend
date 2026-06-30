@@ -131,6 +131,65 @@ router.post('/:inquiryId/analyse', async (req: Request, res: Response) => {
   }
 });
 
+// ─── POST /api/stage5/:inquiryId/items ───────────────────────────────────────
+
+router.post('/:inquiryId/items', async (req: Request, res: Response) => {
+  try {
+    const inquiryId = decodeURIComponent(req.params.inquiryId);
+
+    const {
+      clauseId, sourceRef, topic, category,
+      rfqBuyerRequirement, oswalStandOffer, impact, status, owner, remarks,
+    } = req.body as Partial<{
+      clauseId: string; sourceRef: string; topic: string; category: string;
+      rfqBuyerRequirement: string; oswalStandOffer: string; impact: string;
+      status: string; owner: string; remarks: string;
+    }>;
+
+    if (!topic?.trim() || !rfqBuyerRequirement?.trim()) {
+      res.status(400).json({ error: 'topic and rfqBuyerRequirement are required.' });
+      return;
+    }
+
+    let work = await Stage5Work.findOne({ inquiryId });
+    if (!work) {
+      work = new Stage5Work({ inquiryId, status: 'done' });
+    }
+    if (work.status === 'pending') work.status = 'done';
+
+    const effectiveStatus = status?.trim() || 'Under review';
+    const newItem = {
+      clauseId:            clauseId?.trim() || `MAN-${Date.now()}`,
+      sourceRef:           sourceRef?.trim() || 'Manual',
+      topic:               topic.trim(),
+      category:            category?.trim() || 'Technical',
+      rfqBuyerRequirement: rfqBuyerRequirement.trim(),
+      oswalStandOffer:     oswalStandOffer?.trim() || '',
+      impact:              impact?.trim() || '',
+      status:              effectiveStatus,
+      owner:               owner?.trim() || '',
+      compliantFlag:       effectiveStatus === 'Compliant',
+      deviationFlag:       effectiveStatus === 'Deviation',
+      blockerFlag:         effectiveStatus === 'Blocker',
+      openFlag:            effectiveStatus === 'Under review',
+      statusOverride:      null,
+      ownerOverride:       null,
+      remarks:             remarks?.trim() || '',
+    };
+
+    work.complianceMatrix.push(newItem as any);
+    recomputeMeta(work);
+    work.markModified('complianceMatrix');
+    work.markModified('complianceMeta');
+    await work.save();
+
+    res.status(201).json(formatWork(work));
+  } catch (err) {
+    console.error('[stage5] add item error:', err);
+    res.status(500).json({ error: 'Failed to add item.', details: String(err) });
+  }
+});
+
 // ─── PATCH /api/stage5/:inquiryId/items/:itemIndex ───────────────────────────
 
 router.patch('/:inquiryId/items/:itemIndex', async (req: Request, res: Response) => {
@@ -153,7 +212,14 @@ router.patch('/:inquiryId/items/:itemIndex', async (req: Request, res: Response)
       return;
     }
 
-    const { statusOverride, ownerOverride, remarks } = req.body as {
+    const {
+      topic, category, sourceRef, rfqBuyerRequirement,
+      oswalStandOffer, impact, status, owner,
+      statusOverride, ownerOverride, remarks,
+    } = req.body as {
+      topic?: string; category?: string; sourceRef?: string;
+      rfqBuyerRequirement?: string; oswalStandOffer?: string;
+      impact?: string; status?: string; owner?: string;
       statusOverride?: string | null;
       ownerOverride?:  string | null;
       remarks?:        string;
@@ -161,9 +227,17 @@ router.patch('/:inquiryId/items/:itemIndex', async (req: Request, res: Response)
 
     const item = work.complianceMatrix[itemIndex];
 
-    if (statusOverride !== undefined) item.statusOverride = statusOverride || null;
-    if (ownerOverride  !== undefined) item.ownerOverride  = ownerOverride  || null;
-    if (remarks        !== undefined) item.remarks        = remarks.trim();
+    if (topic               !== undefined) item.topic               = topic.trim();
+    if (category            !== undefined) item.category            = category.trim();
+    if (sourceRef           !== undefined) item.sourceRef           = sourceRef.trim();
+    if (rfqBuyerRequirement !== undefined) item.rfqBuyerRequirement = rfqBuyerRequirement.trim();
+    if (oswalStandOffer     !== undefined) item.oswalStandOffer     = oswalStandOffer.trim();
+    if (impact              !== undefined) item.impact              = impact.trim();
+    if (status              !== undefined) item.status              = status.trim();
+    if (owner               !== undefined) item.owner               = owner.trim();
+    if (statusOverride      !== undefined) item.statusOverride      = statusOverride || null;
+    if (ownerOverride       !== undefined) item.ownerOverride       = ownerOverride  || null;
+    if (remarks             !== undefined) item.remarks             = remarks.trim();
 
     const effectiveStatus = item.statusOverride ?? item.status;
     item.compliantFlag = effectiveStatus === 'Compliant';
@@ -180,6 +254,38 @@ router.patch('/:inquiryId/items/:itemIndex', async (req: Request, res: Response)
   } catch (err) {
     console.error('[stage5] patch item error:', err);
     res.status(500).json({ error: 'Failed to update item.', details: String(err) });
+  }
+});
+
+// ─── DELETE /api/stage5/:inquiryId/items/:itemIndex ──────────────────────────
+
+router.delete('/:inquiryId/items/:itemIndex', async (req: Request, res: Response) => {
+  try {
+    const inquiryId = decodeURIComponent(req.params.inquiryId);
+    const itemIndex = parseInt(req.params.itemIndex, 10);
+
+    if (isNaN(itemIndex) || itemIndex < 0) {
+      res.status(400).json({ error: 'Invalid item index.' });
+      return;
+    }
+
+    const work = await Stage5Work.findOne({ inquiryId });
+    if (!work) { res.status(404).json({ error: 'Stage 5 data not found.' }); return; }
+    if (itemIndex >= work.complianceMatrix.length) {
+      res.status(404).json({ error: `Item index ${itemIndex} out of range.` });
+      return;
+    }
+
+    work.complianceMatrix.splice(itemIndex, 1);
+    recomputeMeta(work);
+    work.markModified('complianceMatrix');
+    work.markModified('complianceMeta');
+    await work.save();
+
+    res.json(formatWork(work));
+  } catch (err) {
+    console.error('[stage5] delete item error:', err);
+    res.status(500).json({ error: 'Failed to delete item.', details: String(err) });
   }
 });
 

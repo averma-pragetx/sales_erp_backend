@@ -1,17 +1,22 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IBomComponent {
-  srNo:        string;
-  component:   string;
-  applicable:  string;
-  moc:         string | null;
-  mocSource:   string;
-  mocFlag:     string | null;
-  typeDetail:  string | null;
-  remarks:     string;
-  weightKg:    number | null;
-  quantity:    string;
-  unit:        string;
+  srNo:           string;
+  component:      string;
+  applicable:     string;
+  moc:            string | null;
+  mocSource:      string;
+  mocFlag:        string | null;
+  typeDetail:     string | null;
+  remarks:        string;
+  weightKg:       number | null;
+  quantity:       string;
+  unit:           string;
+  unitCostPerKg:   number | null;
+  materialCost:    number | null;
+  fabricationCost: number | null;
+  totalCost:       number | null;
+  costBasis:       string | null;
 }
 
 export interface INozzle {
@@ -24,6 +29,8 @@ export interface INozzle {
   mocNeck:     string | null;
   mocFlange:   string | null;
   mocFlag:     string | null;
+  totalCost:   number | null;
+  costBasis:   string | null;
 }
 
 export interface IEquipmentBom {
@@ -54,6 +61,12 @@ export interface IEquipmentBom {
   hydrogenService:           boolean;
   bom:                       IBomComponent[];
   nozzleSchedule:            INozzle[];
+  totalMaterialCost:         number | null;
+  totalFabricationCost:      number | null;
+  totalNozzleCost:           number | null;
+  specialCost:               number | null;
+  inspectionCost:            number | null;
+  totalEquipCost:            number | null;
 }
 
 export interface IProjectInfo {
@@ -87,9 +100,14 @@ const BomComponentSchema = new Schema<IBomComponent>(
     mocFlag:    { type: String, default: null },
     typeDetail: { type: String, default: null },
     remarks:    { type: String, default: '' },
-    weightKg:   { type: Number, default: null },
-    quantity:   { type: String, default: '' },
-    unit:       { type: String, default: '' },
+    weightKg:        { type: Number, default: null },
+    quantity:        { type: String, default: '' },
+    unit:            { type: String, default: '' },
+    unitCostPerKg:   { type: Number, default: null },
+    materialCost:    { type: Number, default: null },
+    fabricationCost: { type: Number, default: null },
+    totalCost:       { type: Number, default: null },
+    costBasis:       { type: String, default: null },
   },
   { _id: false },
 );
@@ -105,6 +123,8 @@ const NozzleSchema = new Schema<INozzle>(
     mocNeck:     { type: String, default: null },
     mocFlange:   { type: String, default: null },
     mocFlag:     { type: String, default: null },
+    totalCost:   { type: Number, default: null },
+    costBasis:   { type: String, default: null },
   },
   { _id: false },
 );
@@ -138,6 +158,12 @@ const EquipmentBomSchema = new Schema<IEquipmentBom>(
     hydrogenService:           { type: Boolean, default: false },
     bom:                       { type: [BomComponentSchema], default: [] },
     nozzleSchedule:            { type: [NozzleSchema], default: [] },
+    totalMaterialCost:         { type: Number, default: null },
+    totalFabricationCost:      { type: Number, default: null },
+    totalNozzleCost:           { type: Number, default: null },
+    specialCost:               { type: Number, default: null },
+    inspectionCost:            { type: Number, default: null },
+    totalEquipCost:            { type: Number, default: null },
   },
   { _id: false },
 );
