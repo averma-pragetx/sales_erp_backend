@@ -46,11 +46,13 @@ export async function extractPageTexts(buffer: Buffer): Promise<string[]> {
 // ─── 2. Tree builder ───────────────────────────────────────────────────────────
 // ponytail: tree nesting is capped at 2 static levels (sections/subsections) —
 // neither provider's structured/JSON output is set up for recursive schemas
-// here. Deepen only if a real document needs a 3rd level. Also caps input at
-// ~250k chars per call, no continuation-loop for oversized docs — add if a
-// real RFQ doc hits the cap.
-
-const MAX_INPUT_CHARS = 250_000;
+// here. Deepen only if a real document needs a 3rd level.
+// Input cap is 600k chars (~150k tokens) — comfortably inside both models'
+// context windows and enough for the vast majority of RFQ packages in one pass.
+// Beyond that the tail gets sliced off; we flag it (qualityFlags) rather than
+// silently dropping it. Upgrade path when real docs exceed this: a two-pass
+// build (skeleton pass, then per-window detail pass).
+const MAX_INPUT_CHARS = 600_000;
 
 interface RawNode {
   title?: string;
@@ -97,11 +99,73 @@ function normalizeTree(rawSections: RawNode[], pageCount: number): IPageIndexNod
   });
 }
 
+function numberPages(pageTexts: string[]): string {
+  return pageTexts.map((t, i) => `<page_${i + 1}>\n${t}\n</page_${i + 1}>`).join('\n\n');
+}
+
+// ─── Tree quality validation (deterministic, no LLM) ─────────────────────────
+
+const MIN_SUMMARY_WORDS = 20;
+const MAX_SIBLING_OVERLAP_PAGES = 2; // small overlaps (shared intro pages) are fine; larger ones are suspicious
+
+export function summarizeRanges(pages: number[]): string {
+  if (pages.length === 0) return '';
+  const sorted = [...pages].sort((a, b) => a - b);
+  const out: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === prev + 1) { prev = sorted[i]; continue; }
+    out.push(start === prev ? `${start}` : `${start}–${prev}`);
+    start = prev = sorted[i];
+  }
+  out.push(start === prev ? `${start}` : `${start}–${prev}`);
+  return out.join(', ');
+}
+
+export function validateTree(tree: IPageIndexNode[], pageCount: number, inputTruncated: boolean): string[] {
+  const flags: string[] = [];
+
+  if (inputTruncated) {
+    flags.push(`Document exceeded the ${MAX_INPUT_CHARS.toLocaleString()}-char analysis limit — sections near the end of the document may be missing or approximate.`);
+  }
+  if (tree.length === 0) {
+    flags.push('No sections were produced — the structure map is empty.');
+    return flags;
+  }
+
+  // Per-node sanity: valid ranges, non-trivial summaries (sections + subsections)
+  const allNodes: IPageIndexNode[] = [];
+  for (const s of tree) { allNodes.push(s); for (const sub of s.nodes) allNodes.push(sub); }
+  for (const n of allNodes) {
+    if (n.startPage > n.endPage) flags.push(`"${n.title}" has startPage > endPage (${n.startPage}–${n.endPage}).`);
+    if (n.startPage < 1 || n.endPage > pageCount) flags.push(`"${n.title}" page range ${n.startPage}–${n.endPage} falls outside 1–${pageCount}.`);
+    const words = n.summary.trim().split(/\s+/).filter(Boolean).length;
+    if (words < MIN_SUMMARY_WORDS) flags.push(`"${n.title}" has a very short summary (${words} word${words === 1 ? '' : 's'}).`);
+  }
+
+  // Coverage + overlap across top-level sections
+  const covered = new Array<number>(pageCount + 1).fill(0);
+  for (const s of tree) {
+    for (let p = Math.max(1, s.startPage); p <= Math.min(pageCount, s.endPage); p++) covered[p]++;
+  }
+  const gaps: number[] = [];
+  for (let p = 1; p <= pageCount; p++) if (covered[p] === 0) gaps.push(p);
+  if (gaps.length) flags.push(`${gaps.length} page(s) not covered by any section: ${summarizeRanges(gaps)}.`);
+
+  const secs = [...tree].sort((a, b) => a.startPage - b.startPage);
+  for (let i = 1; i < secs.length; i++) {
+    const overlap = secs[i - 1].endPage - secs[i].startPage + 1;
+    if (overlap > MAX_SIBLING_OVERLAP_PAGES) {
+      flags.push(`Sections "${secs[i - 1].title}" and "${secs[i].title}" overlap by ${overlap} pages.`);
+    }
+  }
+
+  return flags;
+}
+
 function buildTreeInstructions(pageTexts: string[], docTitle: string): string {
-  const numbered = pageTexts
-    .map((t, i) => `<page_${i + 1}>\n${t}\n</page_${i + 1}>`)
-    .join('\n\n')
-    .slice(0, MAX_INPUT_CHARS);
+  const numbered = numberPages(pageTexts).slice(0, MAX_INPUT_CHARS);
 
   return (
     `You are analyzing "${docTitle}", a ${pageTexts.length}-page document. Build a table-of-contents-style outline of its structure — ` +
@@ -155,22 +219,38 @@ const TREE_SCHEMA = {
   required: ['docSummary', 'sections'],
 };
 
-async function buildTreeGemini(pageTexts: string[], docTitle: string): Promise<RawTree> {
+function parseTreeJson(raw: string, provider: string): RawTree {
+  try {
+    return JSON.parse(raw) as RawTree;
+  } catch (err) {
+    throw new Error(
+      `${provider} returned malformed tree JSON (${(err as Error).message}). This usually means the response ` +
+      `was cut off before finishing — the document likely has more sections than fit in the output token budget.`,
+    );
+  }
+}
+
+async function callTreeGemini(instructions: string): Promise<RawTree> {
   const ai = getGemini();
 
   const res = await ai.models.generateContent({
     model: GEMINI_MODEL,
-    contents: [{ role: 'user', parts: [{ text: buildTreeInstructions(pageTexts, docTitle) }] }],
+    contents: [{ role: 'user', parts: [{ text: instructions }] }],
     config: {
       responseMimeType: 'application/json',
       responseSchema:   TREE_SCHEMA,
-      maxOutputTokens:  16000,
+      maxOutputTokens:  65536,
     },
   });
 
+  const finishReason = res.candidates?.[0]?.finishReason;
+  if (finishReason === 'MAX_TOKENS') {
+    throw new Error('Gemini hit the output token limit while building the tree — this document has too many sections to index in one pass.');
+  }
+
   const raw = res.text?.trim();
   if (!raw) throw new Error('Gemini returned an empty tree.');
-  return JSON.parse(raw) as RawTree;
+  return parseTreeJson(raw, 'Gemini');
 }
 
 const TREE_JSON_SHAPE =
@@ -186,37 +266,92 @@ const TREE_JSON_SHAPE =
   `}\n` +
   `"subsections" must be an empty array when the document has no real internal structure at that point.`;
 
-async function buildTreeOpenAI(pageTexts: string[], docTitle: string): Promise<RawTree> {
+async function callTreeOpenAI(instructions: string): Promise<RawTree> {
   const ai = getOpenAI();
 
   const res = await ai.chat.completions.create({
     model: OPENAI_MODEL,
     response_format: { type: 'json_object' },
-    max_completion_tokens: 16000,
+    max_completion_tokens: 32768,
     messages: [
       { role: 'system', content: TREE_JSON_SHAPE },
-      { role: 'user', content: buildTreeInstructions(pageTexts, docTitle) },
+      { role: 'user', content: instructions },
     ],
   });
 
+  if (res.choices[0].finish_reason === 'length') {
+    throw new Error('OpenAI hit the output token limit while building the tree — this document has too many sections to index in one pass.');
+  }
+
   const raw = res.choices[0].message.content;
   if (!raw) throw new Error('OpenAI returned an empty tree.');
-  return JSON.parse(raw) as RawTree;
+  return parseTreeJson(raw, 'OpenAI');
+}
+
+async function runTreeCall(instructions: string, provider: LlmProvider): Promise<RawTree> {
+  return provider === 'openai' ? callTreeOpenAI(instructions) : callTreeGemini(instructions);
+}
+
+function finalizeTree(raw: RawTree, pageTexts: string[]): { docSummary: string; tree: IPageIndexNode[]; qualityFlags: string[] } {
+  const inputTruncated = numberPages(pageTexts).length > MAX_INPUT_CHARS;
+  const tree = normalizeTree(raw.sections ?? [], pageTexts.length);
+  return {
+    docSummary:   raw.docSummary ?? '',
+    tree,
+    qualityFlags: validateTree(tree, pageTexts.length, inputTruncated),
+  };
 }
 
 export async function buildPageIndexTree(
   pageTexts: string[],
   docTitle:  string,
   provider:  LlmProvider,
-): Promise<{ docSummary: string; tree: IPageIndexNode[] }> {
-  const raw = provider === 'openai'
-    ? await buildTreeOpenAI(pageTexts, docTitle)
-    : await buildTreeGemini(pageTexts, docTitle);
+): Promise<{ docSummary: string; tree: IPageIndexNode[]; qualityFlags: string[] }> {
+  const raw = await runTreeCall(buildTreeInstructions(pageTexts, docTitle), provider);
+  return finalizeTree(raw, pageTexts);
+}
 
-  return {
-    docSummary: raw.docSummary ?? '',
-    tree:       normalizeTree(raw.sections ?? [], pageTexts.length),
-  };
+// ─── Repair — targeted fix for validateTree's complaints, not a full rebuild ──
+// ponytail: the "document exceeded analysis limit" flag is structural (input
+// too big for one pass) and can't be patched by editing the tree — repair only
+// targets the mechanically-fixable flags (gaps, overlaps, bad ranges, thin
+// summaries). isFixableFlag() is how the route decides what to send here.
+
+const STRUCTURAL_FLAG_PREFIX = 'Document exceeded';
+
+export function isFixableFlag(flag: string): boolean {
+  return !flag.startsWith(STRUCTURAL_FLAG_PREFIX);
+}
+
+function buildRepairInstructions(pageTexts: string[], docTitle: string, currentTree: IPageIndexNode[], flags: string[]): string {
+  const numbered = numberPages(pageTexts).slice(0, MAX_INPUT_CHARS);
+
+  return (
+    `You previously built a table-of-contents-style structure map for "${docTitle}" (${pageTexts.length} pages). ` +
+    `A validation pass found these issues with it:\n${flags.map(f => `- ${f}`).join('\n')}\n\n` +
+    `Current structure map, JSON:\n${JSON.stringify(currentTree)}\n\n` +
+    `Fix ONLY what's needed to resolve the listed issues — keep every section/subsection that isn't implicated ` +
+    `exactly as it is (same title, pages, summary). Guidance per issue type:\n` +
+    `- Uncovered pages: read what's actually on those pages below, then either extend the most relevant ` +
+    `neighboring section to include them or add a new section — whichever matches the document's real structure.\n` +
+    `- Short summaries: rewrite to 1-2 full sentences grounded in the actual page content, specific enough to ` +
+    `judge relevance without reading the pages.\n` +
+    `- Overlapping sections: move the boundary to the correct split point between them.\n` +
+    `- Invalid page ranges: correct them to fall within 1–${pageTexts.length} with startPage <= endPage.\n\n` +
+    `Return the COMPLETE corrected structure — every section, not just the ones you changed — covering the ` +
+    `whole document. Read the page-tagged text below to make these decisions accurately.\n\n${numbered}`
+  );
+}
+
+export async function repairPageIndexTree(
+  pageTexts:   string[],
+  docTitle:    string,
+  currentTree: IPageIndexNode[],
+  flags:       string[],
+  provider:    LlmProvider,
+): Promise<{ docSummary: string; tree: IPageIndexNode[]; qualityFlags: string[] }> {
+  const raw = await runTreeCall(buildRepairInstructions(pageTexts, docTitle, currentTree, flags), provider);
+  return finalizeTree(raw, pageTexts);
 }
 
 // ─── 3. Retrieval — reasoning over the tree, targeted page fetch, keyword search ──
@@ -243,16 +378,23 @@ function buildSystemInstruction(tree: IPageIndexNode[], docSummary: string): str
     `Document summary: ${docSummary}\n\n` +
     `Structure (titles, page ranges, summaries), JSON:\n${JSON.stringify(tree)}\n\n` +
     `You MUST ground every answer in text you actually fetched this turn — never answer from the structure ` +
-    `summaries alone, they are only a map for deciding where to look.\n\n` +
+    `summaries alone; they are only a map for deciding where to look. You have a limited number of lookups per ` +
+    `question, so target them well.\n\n` +
     `Tools:\n` +
     `- get_page_content(startPage, endPage): use once you've picked a specific relevant section/subsection from ` +
-    `the structure above. Keep the range TIGHT — just the pages you need. Call it again for another range.\n` +
+    `the structure above. Keep the range TIGHT — just the pages you need. Call it again for another range. If a ` +
+    `result ends with a [TRUNCATED] notice, the range was too large: re-fetch a narrower range, or, if you ` +
+    `already have enough, proceed but state in your answer that only part of that range was reviewed.\n` +
     `- search_document(query): use when the question names a specific term, tag/clause/item number, or value ` +
-    `that might not be mentioned in a section summary, or when you are not sure which section covers it. Follow ` +
-    `up with get_page_content on the matching page(s) to read full context before answering.\n\n` +
-    `Be precise and specific: quote exact figures, names, and values verbatim from the fetched text rather than ` +
-    `paraphrasing loosely. Cite the page numbers your answer relies on. If the fetched content doesn't actually ` +
-    `answer the question, say so plainly instead of guessing or padding with generic commentary.`
+    `that a section summary might not mention, or when you are unsure which section covers it. If a search ` +
+    `returns no matches, try 2–3 alternative phrasings (synonyms, abbreviations, singular/plural, with and ` +
+    `without punctuation) before concluding the term is absent. Then use get_page_content on the matching ` +
+    `page(s) to read full context before answering.\n\n` +
+    `Answering:\n` +
+    `- Quote exact figures, names, tags, and values verbatim from the fetched text — do not paraphrase loosely.\n` +
+    `- Cite the specific page each fact came from, inline, e.g. "(p. 12)".\n` +
+    `- If the fetched content doesn't actually answer the question, say so plainly instead of guessing or ` +
+    `padding with generic commentary.`
   );
 }
 
@@ -267,7 +409,7 @@ function fetchPageRange(pageTexts: string[], startArg: unknown, endArg: unknown,
     '\n\n[TRUNCATED — this range is too large to return in full. Call get_page_content again with a narrower range to see the rest.]';
 }
 
-function searchDocument(pageTexts: string[], queryArg: unknown): string {
+export function searchDocument(pageTexts: string[], queryArg: unknown): string {
   const query = String(queryArg ?? '').trim();
   if (!query) return 'No search query provided.';
 
@@ -344,23 +486,30 @@ async function answerGemini(
   ];
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+    const isLastTurn = turn === MAX_TOOL_TURNS - 1;
     const res = await ai.models.generateContent({
       model: GEMINI_MODEL,
       contents,
-      config: {
-        systemInstruction,
-        tools: [RETRIEVAL_TOOLS_GEMINI],
-        // Force at least one real lookup before the model is allowed to answer —
-        // otherwise it tends to just paraphrase the structure summaries.
-        toolConfig: turn === 0
-          ? { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY } }
-          : undefined,
-      },
+      // Turn 0 forces a real lookup (mode ANY) so the model can't just paraphrase
+      // the summaries. The last turn drops tools entirely so the model must
+      // synthesize a final answer from what it has, rather than getting cut off.
+      config: isLastTurn
+        ? { systemInstruction }
+        : {
+            systemInstruction,
+            tools: [RETRIEVAL_TOOLS_GEMINI],
+            toolConfig: turn === 0
+              ? { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY } }
+              : undefined,
+          },
     });
 
     const calls = res.functionCalls ?? [];
     if (calls.length === 0) {
-      return { answer: res.text?.trim() ?? '', pagesUsed: [...pagesUsed].sort((a, b) => a - b) };
+      return {
+        answer: res.text?.trim() || 'I was unable to find enough information in this document to answer confidently.',
+        pagesUsed: [...pagesUsed].sort((a, b) => a - b),
+      };
     }
 
     contents.push({ role: 'model', parts: calls.map(c => ({ functionCall: c })) });
@@ -374,7 +523,7 @@ async function answerGemini(
   }
 
   return {
-    answer:    'I could not narrow this down within the allowed number of lookups — try asking a more specific question.',
+    answer:    'I was unable to find enough information in this document to answer confidently.',
     pagesUsed: [...pagesUsed].sort((a, b) => a - b),
   };
 }
@@ -440,19 +589,23 @@ async function answerOpenAI(
   ];
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-    const res = await ai.chat.completions.create({
-      model: OPENAI_MODEL,
-      messages,
-      tools: RETRIEVAL_TOOLS_OPENAI,
-      // Force at least one real lookup before the model is allowed to answer —
-      // otherwise it tends to just paraphrase the structure summaries.
-      tool_choice: turn === 0 ? 'required' : 'auto',
-    });
+    const isLastTurn = turn === MAX_TOOL_TURNS - 1;
+    // Turn 0 forces a real lookup so the model can't just paraphrase the
+    // summaries. The last turn drops tools so the model must synthesize a final
+    // answer from what it has, rather than getting cut off mid-investigation.
+    const res = await ai.chat.completions.create(
+      isLastTurn
+        ? { model: OPENAI_MODEL, messages }
+        : { model: OPENAI_MODEL, messages, tools: RETRIEVAL_TOOLS_OPENAI, tool_choice: turn === 0 ? 'required' : 'auto' },
+    );
 
     const msg = res.choices[0].message;
     const toolCalls = msg.tool_calls ?? [];
     if (toolCalls.length === 0) {
-      return { answer: msg.content?.trim() ?? '', pagesUsed: [...pagesUsed].sort((a, b) => a - b) };
+      return {
+        answer: msg.content?.trim() || 'I was unable to find enough information in this document to answer confidently.',
+        pagesUsed: [...pagesUsed].sort((a, b) => a - b),
+      };
     }
 
     messages.push({ role: 'assistant', content: msg.content, tool_calls: toolCalls });
@@ -465,7 +618,7 @@ async function answerOpenAI(
   }
 
   return {
-    answer:    'I could not narrow this down within the allowed number of lookups — try asking a more specific question.',
+    answer:    'I was unable to find enough information in this document to answer confidently.',
     pagesUsed: [...pagesUsed].sort((a, b) => a - b),
   };
 }
