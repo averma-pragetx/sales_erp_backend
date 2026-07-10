@@ -17,6 +17,7 @@ import stage5Router   from './routes/stage5';
 import stage6Router   from './routes/stage6';
 import stage7Router   from './routes/stage7';
 import stage8Router   from './routes/stage8';
+import pageIndexRouter from './routes/pageIndex';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -36,6 +37,7 @@ app.use('/api/stage5',    stage5Router);
 app.use('/api/stage6',    stage6Router);
 app.use('/api/stage7',    stage7Router);
 app.use('/api/stage8',    stage8Router);
+app.use('/api/pageindex', pageIndexRouter);
 
 // Health check
 app.get('/health', (_req, res) => {
