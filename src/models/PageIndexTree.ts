@@ -21,6 +21,8 @@ export interface IPageIndexTree extends Document {
   docSummary: string;
   tree:       IPageIndexNode[];
   pageTexts:  string[]; // pageTexts[0] = page 1
+  qualityFlags: string[]; // build-time warnings: coverage gaps, bad ranges, thin summaries, truncated input
+  currentVersion: number; // mirrors the latest row in PageIndexTreeVersion — 0 until the first build completes
 
   builtAt: Date | null;
 
@@ -43,6 +45,8 @@ const PageIndexTreeSchema = new Schema<IPageIndexTree>(
     // hand-rolled self-referential Mongoose schema for a blob we only read/write whole.
     tree:       { type: Schema.Types.Mixed, default: [] },
     pageTexts:  { type: [String], default: [] },
+    qualityFlags: { type: [String], default: [] },
+    currentVersion: { type: Number, default: 0 },
 
     builtAt: { type: Date, default: null },
   },
