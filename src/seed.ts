@@ -6,6 +6,7 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 import { connectDB } from './db';
 import { Inquiry } from './models/Inquiry';
 import { Doc } from './models/Document';
+import { Lead } from './models/Lead';
 
 const inquiries = [
   {
@@ -145,6 +146,128 @@ const documents0407 = [
   { docType: 'TCL', title: 'Technical Compliance Statement', rev: 'A', status: 'read' as const },
 ];
 
+function daysFromNow(n: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+const leads = [
+  {
+    leadId: 'L-2849',
+    client: 'BPCL Bina Petchem',
+    clientType: 'PSU · End User',
+    tenderRef: 'B957-300-EE-MR-6340/139',
+    title: 'Heat Exchangers — CS / LTCS (12 tags)',
+    source: 'EIL Tender Portal',
+    value: 15.86,
+    currency: 'INR' as const,
+    valueUnit: 'Cr' as const,
+    dueDate: daysFromNow(6),
+    avlStatus: 'approved' as const,
+    score: 94,
+    assignedTo: 'Sneha B.',
+    notes: 'HX core + LTCS capability match. EIL approved, Bina geography fit.',
+  },
+  {
+    leadId: 'L-2848',
+    client: 'TCE / IOCL Paradip',
+    clientType: 'PSU · EPCM',
+    tenderRef: 'TCE/PAR/2026/COND-118',
+    title: 'Air-cooled Condenser bank (3 nos)',
+    source: 'GeM',
+    value: 4.20,
+    currency: 'INR' as const,
+    valueUnit: 'Cr' as const,
+    dueDate: daysFromNow(18),
+    avlStatus: 'approved' as const,
+    score: 81,
+    assignedTo: 'Aaman S.',
+    notes: 'EPCM relationship + cooling tech fit. AVL renewal due Q3.',
+  },
+  {
+    leadId: 'L-2847',
+    client: 'ONGC Hazira',
+    clientType: 'PSU · End User',
+    tenderRef: 'ONGC/HAZ/PIG/2026/044',
+    title: 'Pig Launchers / Receivers (8 nos, 24in)',
+    source: 'ONGC e-Procure',
+    value: 5.80,
+    currency: 'INR' as const,
+    valueUnit: 'Cr' as const,
+    dueDate: daysFromNow(25),
+    avlStatus: 'approved' as const,
+    score: 76,
+    assignedTo: 'Rahul J.',
+    notes: 'Pig launchers core capability + ONGC AVL. Last delivery was 18in size.',
+  },
+  {
+    leadId: 'L-2846',
+    client: 'Adani Petrochem · Mundra',
+    clientType: 'Private · End User',
+    tenderRef: 'APL/MUN/SD-2026/077',
+    title: 'Surge Drum + Reflux Drum package',
+    source: 'Google News + Adani Vendor Portal',
+    value: 2.80,
+    currency: 'INR' as const,
+    valueUnit: 'Cr' as const,
+    dueDate: daysFromNow(12),
+    avlStatus: 'not_registered' as const,
+    score: 68,
+    assignedTo: 'Priya N.',
+    notes: 'Pressure vessels core capability, but not on AVL — new relationship with Adani.',
+  },
+  {
+    leadId: 'L-2845',
+    client: 'QatarEnergy LNG (via Wood)',
+    clientType: 'EPC · International',
+    tenderRef: 'WD-QE-LNG/2026/SD-283',
+    title: 'Filter Coalescer Package (skid)',
+    source: 'GeM (Wood India)',
+    value: 24.80,
+    currency: 'INR' as const,
+    valueUnit: 'Cr' as const,
+    dueDate: daysFromNow(35),
+    avlStatus: 'review' as const,
+    score: 71,
+    assignedTo: 'Aaman S.',
+    notes: 'Skidded package + Wood relationship. IECEx certificates in renewal, USD invoicing.',
+  },
+  {
+    leadId: 'L-2844',
+    client: 'HPCL Visakh',
+    clientType: 'PSU · End User',
+    tenderRef: 'HPCL/VSP/AR/2026/091',
+    title: 'Air Receivers (6 nos, ASME U)',
+    source: 'GeM',
+    value: 1.35,
+    currency: 'INR' as const,
+    valueUnit: 'Cr' as const,
+    dueDate: daysFromNow(9),
+    avlStatus: 'approved' as const,
+    score: 64,
+    assignedTo: 'Sneha B.',
+    notes: 'ASME U stamp + low-value quick turn, but margin profile is tight.',
+  },
+  {
+    leadId: 'L-2843',
+    client: 'TotalEnergies Gabon (via Petrofac)',
+    clientType: 'EPC · International',
+    tenderRef: 'PF-TG/2026/REC-018',
+    title: 'Heat Exchanger — refurb scope',
+    source: 'LinkedIn + Petrofac',
+    value: 5.60,
+    currency: 'INR' as const,
+    valueUnit: 'Cr' as const,
+    dueDate: daysFromNow(42),
+    avlStatus: 'not_registered' as const,
+    score: 62,
+    assignedTo: 'Rahul J.',
+    notes: 'HX scope but refurb, not core new-build. Field service ahead of AVL registration.',
+  },
+];
+
 async function seed(): Promise<void> {
   await connectDB();
 
@@ -204,6 +327,19 @@ async function seed(): Promise<void> {
     } else {
       console.log(`  Skipped (exists): ${d.docType} — ${d.title}`);
     }
+  }
+
+  console.log('Seeding leads...');
+  for (const lead of leads) {
+    await Lead.findOneAndUpdate(
+      { leadId: lead.leadId },
+      {
+        $set: lead,
+        $setOnInsert: { status: 'new', pushedInquiryId: null },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    console.log(`  Upserted lead: ${lead.leadId}`);
   }
 
   console.log('Seed complete.');

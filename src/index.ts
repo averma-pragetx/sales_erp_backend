@@ -8,6 +8,7 @@ import express from 'express';
 import cors from 'cors';
 import { connectDB } from './db';
 import inquiriesRouter from './routes/inquiries';
+import leadsRouter from './routes/leads';
 import documentsRouter from './routes/documents';
 import extractRouter from './routes/extract';
 import sectionsRouter from './routes/sections';
@@ -28,6 +29,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/inquiries', inquiriesRouter);
+app.use('/api/leads',     leadsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/extract',   extractRouter);
 app.use('/api/sections',  sectionsRouter);
