@@ -1,4 +1,5 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { Type } from '@google/genai';
+import { getGemini as getClient } from '../ai/clients';
 
 // ─── Response shape (mirrors the JSON schema below) ──────────────────────────
 
@@ -56,20 +57,6 @@ const RESPONSE_SCHEMA = {
   },
   required: ['overview', 'keyItems', 'sections'],
 };
-
-// ─── Client ───────────────────────────────────────────────────────────────────
-
-// Singleton — one client per process, not one per request
-let _client: GoogleGenAI | null = null;
-
-function getClient(): GoogleGenAI {
-  if (!_client) {
-    const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('Missing GOOGLE_API_KEY (or GEMINI_API_KEY) in env.');
-    _client = new GoogleGenAI({ apiKey });
-  }
-  return _client;
-}
 
 // ─── Main extraction function ─────────────────────────────────────────────────
 

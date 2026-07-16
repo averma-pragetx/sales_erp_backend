@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import { Inquiry } from '../models/Inquiry';
 import { Section } from '../models/Section';
 import { Stage3Work } from '../models/Stage3Work';
@@ -6,11 +5,7 @@ import { Stage4Work } from '../models/Stage4Work';
 import { TechQuery } from '../models/TechQuery';
 import { Stage7Work } from '../models/Stage7Work';
 
-function getClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('Missing OPENAI_API_KEY in env.');
-  return new OpenAI({ apiKey });
-}
+import { getOpenAI as getClient } from '../ai/clients';
 
 export interface ProposalResult {
   title: string;

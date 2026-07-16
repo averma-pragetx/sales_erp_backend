@@ -1,11 +1,5 @@
-import OpenAI from 'openai';
 import type { IGap } from '../models/Stage3Work';
-
-function getClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('Missing OPENAI_API_KEY in env.');
-  return new OpenAI({ apiKey });
-}
+import { getOpenAI as getClient } from '../ai/clients';
 
 export interface SectionInput {
   docType: string;

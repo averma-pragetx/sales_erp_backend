@@ -1,5 +1,4 @@
 import * as pdfParseModule from 'pdf-parse';
-import { GoogleGenAI } from '@google/genai';
 import {
   IEquipmentBom, IBomComponent, INozzle, IProjectInfo,
 } from '../models/Stage7Work';
@@ -8,11 +7,7 @@ const pdfParse: (buf: Buffer) => Promise<{ text: string }> =
   (pdfParseModule as unknown as { default?: (buf: Buffer) => Promise<{ text: string }> }).default
   ?? (pdfParseModule as unknown as (buf: Buffer) => Promise<{ text: string }>);
 
-function getClient(): GoogleGenAI {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) throw new Error('Missing GOOGLE_API_KEY in env.');
-  return new GoogleGenAI({ apiKey });
-}
+import { getGemini as getClient } from '../ai/clients';
 
 // ─── System prompt (from step6_BOM.md) ───────────────────────────────────────
 

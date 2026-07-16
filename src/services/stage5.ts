@@ -1,13 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
 import { IComplianceMeta, IComplianceItem } from '../models/Stage5Work';
-
-// ─── Gemini client ────────────────────────────────────────────────────────────
-
-function getClient(): GoogleGenAI {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) throw new Error('Missing GOOGLE_API_KEY in env.');
-  return new GoogleGenAI({ apiKey });
-}
+import { getGemini as getClient } from '../ai/clients';
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 

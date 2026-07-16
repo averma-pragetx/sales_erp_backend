@@ -1,35 +1,10 @@
-import { GoogleGenAI, Type, FunctionCallingConfigMode } from '@google/genai';
-import OpenAI from 'openai';
+import { Type, FunctionCallingConfigMode } from '@google/genai';
+import type OpenAI from 'openai';
 import { PDFParse } from 'pdf-parse';
 import type { IPageIndexNode } from '../models/PageIndexTree';
+import { getGemini, getOpenAI, GEMINI_MODEL, OPENAI_MODEL, type LlmProvider } from '../ai/clients';
 
-export type LlmProvider = 'gemini' | 'openai';
-
-// ─── Clients ───────────────────────────────────────────────────────────────────
-
-let _gemini: GoogleGenAI | null = null;
-let _openai: OpenAI | null = null;
-
-function getGemini(): GoogleGenAI {
-  if (!_gemini) {
-    const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('Missing GOOGLE_API_KEY (or GEMINI_API_KEY) in env.');
-    _gemini = new GoogleGenAI({ apiKey });
-  }
-  return _gemini;
-}
-
-function getOpenAI(): OpenAI {
-  if (!_openai) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('Missing OPENAI_API_KEY in env.');
-    _openai = new OpenAI({ apiKey });
-  }
-  return _openai;
-}
-
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const OPENAI_MODEL = 'gpt-5.4';
+export type { LlmProvider };
 
 // ─── 1. Per-page text extraction (no LLM — standard PDF text parsing) ────────
 

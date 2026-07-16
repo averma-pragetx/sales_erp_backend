@@ -7,8 +7,15 @@ import { extractTenderMeta } from '../services/tenderExtract';
 
 const router = Router();
 
+// Everything the scraper pipeline uploads today comes from the GeM scraper
+const DEFAULT_SCRAPER_ID = 'GEM-OG-01';
+
 // Mirrors any scraped_tenders docs not yet in tender_leads into the tender_leads collection
 async function syncNewTenders(): Promise<void> {
+  await TenderLead.updateMany(
+    { $or: [{ scraperId: { $exists: false } }, { scraperId: '' }] },
+    { $set: { scraperId: DEFAULT_SCRAPER_ID } }
+  );
   const scraped = await ScrapedTender.find().lean();
   const existingNames = new Set(
     (await TenderLead.find({}, 'tenderName').lean()).map(t => t.tenderName)
@@ -20,6 +27,7 @@ async function syncNewTenders(): Promise<void> {
     const zip = tender.files.find(f => f.mimeType === 'application/zip');
     await TenderLead.create({
       tenderName: tender.tenderName,
+      scraperId:  DEFAULT_SCRAPER_ID,
       pdfS3Key:   pdf?.s3Key ?? '',
       zipS3Key:   zip?.s3Key ?? '',
     });
@@ -31,6 +39,7 @@ async function formatLead(lead: ITenderLead) {
 
   return {
     tenderName: lead.tenderName,
+    scraperId:  lead.scraperId,
     tenderId:   lead.tenderId || lead.tenderName,
     client:     lead.client,
     title:      lead.title || lead.tenderName,
@@ -56,10 +65,11 @@ router.get('/', async (req: Request, res: Response) => {
 
     const page  = Math.max(1, parseInt(String(req.query.page), 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit), 10) || 20));
+    const filter = req.query.scraperId ? { scraperId: String(req.query.scraperId) } : {};
 
     const [leads, total] = await Promise.all([
-      TenderLead.find().sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
-      TenderLead.countDocuments(),
+      TenderLead.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      TenderLead.countDocuments(filter),
     ]);
 
     res.json({

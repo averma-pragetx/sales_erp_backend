@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITenderLead extends Document {
   tenderName: string;
+  scraperId: string;
   pdfS3Key: string;
   zipS3Key: string;
   tenderId: string;
@@ -23,6 +24,7 @@ export interface ITenderLead extends Document {
 const TenderLeadSchema = new Schema<ITenderLead>(
   {
     tenderName: { type: String, required: true, index: true, unique: true },
+    scraperId:  { type: String, default: '', index: true },
     pdfS3Key:   { type: String, default: '' },
     zipS3Key:   { type: String, default: '' },
     tenderId:   { type: String, default: '' },

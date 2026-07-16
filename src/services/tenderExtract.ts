@@ -1,10 +1,5 @@
-import { GoogleGenAI, Type } from '@google/genai';
-
-function getGemini(): GoogleGenAI {
-  const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('Missing GOOGLE_API_KEY in env.');
-  return new GoogleGenAI({ apiKey });
-}
+import { Type } from '@google/genai';
+import { getGemini } from '../ai/clients';
 
 export interface TenderMeta {
   tenderId:  string;

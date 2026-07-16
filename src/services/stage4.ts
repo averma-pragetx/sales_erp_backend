@@ -1,14 +1,10 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { Type } from '@google/genai';
 import * as pdfParseModule from 'pdf-parse';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const pdfParse: (buf: Buffer) => Promise<{ text: string }> = (pdfParseModule as any).default ?? pdfParseModule;
 import type { ITagItem, IExtractionMeta } from '../models/Stage4Work';
 
-function getGemini(): GoogleGenAI {
-  const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('Missing GOOGLE_API_KEY in env.');
-  return new GoogleGenAI({ apiKey });
-}
+import { getGemini } from '../ai/clients';
 
 export interface TagExtractionResult {
   tags:            ITagItem[];
