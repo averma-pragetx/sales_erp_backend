@@ -14,13 +14,13 @@ function parseProvider(value: unknown): LlmProvider {
 
 // ponytail: loads every done tree's pageTexts into memory per request — fine at
 // current corpus size (tens of docs). Page down / cache when it isn't.
-async function loadCorpus(docId?: string): Promise<CorpusDoc[]> {
-  const filter = docId ? { status: 'done', documentId: docId } : { status: 'done' };
+async function loadCorpus(docIds?: string[]): Promise<CorpusDoc[]> {
+  const filter = docIds?.length ? { status: 'done', documentId: { $in: docIds } } : { status: 'done' };
   const trees = await PageIndexTree.find(filter).lean();
   if (trees.length === 0) return [];
 
-  const docIds = trees.map(t => t.documentId);
-  const docs = await Doc.find({ _id: { $in: docIds } }).select('title inquiryId').lean();
+  const treeDocIds = trees.map(t => t.documentId);
+  const docs = await Doc.find({ _id: { $in: treeDocIds } }).select('title inquiryId').lean();
   const docById = new Map(docs.map(d => [String(d._id), d]));
 
   const inquiries = await Inquiry.find({ inquiryId: { $in: [...new Set(trees.map(t => t.inquiryId))] } })
@@ -88,6 +88,25 @@ router.get('/chats/:chatId', async (req: Request, res: Response) => {
   }
 });
 
+// ─── PATCH /api/search/chats/:chatId ───────────────────────────────────────────
+
+router.patch('/chats/:chatId', async (req: Request, res: Response) => {
+  try {
+    const { title } = req.body as { title?: string };
+    if (!title || !title.trim()) { res.status(400).json({ error: 'title is required.' }); return; }
+    const chat = await SearchChat.findByIdAndUpdate(
+      req.params.chatId,
+      { title: title.trim().slice(0, 80) },
+      { new: true },
+    ).lean();
+    if (!chat) { res.status(404).json({ error: 'Chat not found.' }); return; }
+    res.json({ chatId: String(chat._id), title: chat.title, updatedAt: chat.updatedAt });
+  } catch (err) {
+    console.error('[search] chat rename error:', err);
+    res.status(500).json({ error: 'Failed to rename chat.' });
+  }
+});
+
 // ─── DELETE /api/search/chats/:chatId ──────────────────────────────────────────
 
 router.delete('/chats/:chatId', async (req: Request, res: Response) => {
@@ -104,12 +123,13 @@ router.delete('/chats/:chatId', async (req: Request, res: Response) => {
 
 router.post('/ask', async (req: Request, res: Response) => {
   try {
-    const { question, history, provider, docId, chatId } = req.body as { question?: string; history?: ChatTurn[]; provider?: unknown; docId?: string; chatId?: string };
+    const { question, history, provider, docIds, chatId } = req.body as { question?: string; history?: ChatTurn[]; provider?: unknown; docIds?: string[]; chatId?: string };
     if (!question || !question.trim()) { res.status(400).json({ error: 'question is required.' }); return; }
 
-    const corpus = await loadCorpus(docId);
-    if (docId && corpus.length === 0) {
-      res.status(404).json({ error: 'No indexed document with that docId.' });
+    const scope = Array.isArray(docIds) ? docIds.filter(id => typeof id === 'string' && id.trim()) : [];
+    const corpus = await loadCorpus(scope);
+    if (scope.length > 0 && corpus.length === 0) {
+      res.status(404).json({ error: 'None of the selected documents have a built page index.' });
       return;
     }
     if (corpus.length === 0) {
@@ -117,10 +137,18 @@ router.post('/ask', async (req: Request, res: Response) => {
       return;
     }
 
+    // Past-chat context is server-authoritative: when continuing a chat, history
+    // comes from the stored messages, not the client. Last 12 messages keeps
+    // long chats inside the model's context without losing recent thread.
+    let chat = chatId ? await SearchChat.findById(chatId) : null;
+    const chatHistory: ChatTurn[] = chat
+      ? chat.messages.slice(-12).map(m => ({ role: m.role, text: m.text }))
+      : Array.isArray(history) ? history : [];
+
     const result = await answerAcrossCorpus(
       corpus,
       question.trim(),
-      Array.isArray(history) ? history : [],
+      chatHistory,
       parseProvider(provider),
     );
 
@@ -131,7 +159,6 @@ router.post('/ask', async (req: Request, res: Response) => {
       inquiryId: byId.get(s.docId)?.inquiryId ?? '',
     }));
 
-    let chat = chatId ? await SearchChat.findById(chatId) : null;
     if (!chat) chat = new SearchChat({ title: question.trim().slice(0, 80) });
     chat.messages.push(
       { role: 'user', text: question.trim(), sources: [] },

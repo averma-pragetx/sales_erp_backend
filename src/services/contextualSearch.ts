@@ -39,18 +39,24 @@ function buildSystemInstruction(docs: CorpusDoc[]): string {
     `- get_page_content(docId, startPage, endPage): fetch raw text of a tight page range from one document. ` +
     `If a result ends with [TRUNCATED], re-fetch a narrower range.\n\n` +
     `Answering:\n` +
+    `- Your text reply is ALWAYS shown to the user as the final answer. Never write intentions or progress ` +
+    `notes like "I will now search for..." — if you still need to look something up, call a tool instead of ` +
+    `writing text.\n` +
     `- Quote exact figures, names, tags, and values verbatim from fetched text.\n` +
     `- Cite the document title and page inline for every fact, e.g. "(Tender Spec, p. 12)".\n` +
     `- When a question spans documents/inquiries, check each plausible document, not just the first hit.\n` +
     `- If the fetched content does not answer the question, say so plainly instead of guessing.\n\n` +
-    `Visualization:\n` +
-    `- When the answer contains comparable numbers (costs, quantities, counts, scores, dimensions across items), ` +
-    `ALSO emit a chart as a fenced block, exactly this format:\n` +
+    `Visualization — use the right form for the data:\n` +
+    `- Markdown table: structured multi-column detail (specs, tag lists, compliance items, anything with 2+ ` +
+    `attributes per row). Use freely; tables render natively.\n` +
+    `- Chart: comparable numbers (costs, quantities, counts, scores, dimensions across items). Emit as a fenced ` +
+    `block, exactly this format:\n` +
     '```chart\n{"type":"bar","title":"Design pressure by exchanger","unit":"bar(g)","labels":["E-101","E-102"],"values":[18.5,22]}\n```\n' +
-    `- Types: "bar" — compare labeled items; "line" — trend across ordered points (labels are the x values); ` +
+    `- Chart types: "bar" — compare labeled items; "line" — trend across ordered points (labels are the x values); ` +
     `"stat" — one headline number: {"type":"stat","title":"...","value":42.5,"unit":"₹ Cr"}.\n` +
-    `- Every number in a chart must come verbatim from fetched text — never estimate or invent. Max 12 bars.\n` +
-    `- The prose answer must stand alone without the chart; the chart supplements it. ` +
+    `- Combine forms when useful: a table for the detail plus a chart for the headline comparison.\n` +
+    `- Every number in a chart or table must come verbatim from fetched text — never estimate or invent. Max 12 bars.\n` +
+    `- The prose answer must stand alone without the visuals; they supplement it. ` +
     `Skip charts for single facts (unless a "stat" fits) or non-numeric answers.`
   );
 }

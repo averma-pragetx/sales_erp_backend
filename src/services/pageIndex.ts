@@ -366,6 +366,9 @@ function buildSystemInstruction(tree: IPageIndexNode[], docSummary: string): str
     `without punctuation) before concluding the term is absent. Then use get_page_content on the matching ` +
     `page(s) to read full context before answering.\n\n` +
     `Answering:\n` +
+    `- Your text reply is ALWAYS shown to the user as the final answer. Never write intentions or progress ` +
+    `notes like "I will now search for..." — if you still need to look something up, call a tool instead of ` +
+    `writing text.\n` +
     `- Quote exact figures, names, tags, and values verbatim from the fetched text — do not paraphrase loosely.\n` +
     `- Cite the specific page each fact came from, inline, e.g. "(p. 12)".\n` +
     `- If the fetched content doesn't actually answer the question, say so plainly instead of guessing or ` +
