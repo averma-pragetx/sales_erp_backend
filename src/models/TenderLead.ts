@@ -15,6 +15,7 @@ export interface ITenderLead extends Document {
   dueDate: string;
   score: number | null;
   analysed: boolean;
+  fileMeta: Record<string, unknown>;
   status: 'new' | 'approved' | 'rejected' | 'pushed';
   pushedInquiryId: string | null;
   createdAt: Date;
@@ -37,6 +38,7 @@ const TenderLeadSchema = new Schema<ITenderLead>(
     dueDate:    { type: String, default: '' },
     score:      { type: Number, default: null },
     analysed:   { type: Boolean, default: false },
+    fileMeta:   { type: Schema.Types.Mixed, default: {} },
     status:     { type: String, enum: ['new', 'approved', 'rejected', 'pushed'], default: 'new' },
     pushedInquiryId: { type: String, default: null },
   },

@@ -16,6 +16,7 @@ export interface IInquiry extends Document {
   bidDue: string;
   receivedDate: string;
   source: string;
+  tenderId: string;
   estimator: string;
   completedUpTo: number;
   createdAt: Date;
@@ -48,6 +49,7 @@ const InquirySchema = new Schema<IInquiry>(
     bidDue: { type: String, required: true },
     receivedDate: { type: String, required: true },
     source: { type: String, required: true },
+    tenderId: { type: String, default: '' },
     estimator: { type: String, required: true },
     completedUpTo: { type: Number, required: true },
   },

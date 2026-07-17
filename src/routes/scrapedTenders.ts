@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
+import AdmZip from 'adm-zip';
 import { ScrapedTender } from '../models/ScrapedTender';
 import { TenderLead, ITenderLead } from '../models/TenderLead';
 import { Inquiry } from '../models/Inquiry';
-import { downloadFromS3, getPresignedUrl } from '../s3';
-import { extractTenderMeta } from '../services/tenderExtract';
+import { Doc } from '../models/Document';
+import { downloadFromS3, uploadToS3 } from '../s3';
+import { extractTenderMeta, extractDocMeta } from '../services/tenderExtract';
 
 const router = Router();
 
@@ -34,9 +36,60 @@ async function syncNewTenders(): Promise<void> {
   }
 }
 
-async function formatLead(lead: ITenderLead) {
-  const zipUrl = lead.zipS3Key ? await getPresignedUrl(lead.zipS3Key) : null;
+const MIME_BY_EXT: Record<string, string> = {
+  pdf:  'application/pdf',
+  doc:  'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:  'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv:  'text/csv',
+  txt:  'text/plain',
+  png:  'image/png',
+  jpg:  'image/jpeg',
+  jpeg: 'image/jpeg',
+};
 
+async function saveInquiryDoc(inquiryId: string, fileName: string, buffer: Buffer, mimeType: string): Promise<void> {
+  const s3Key = `inquiries/${inquiryId}/${Date.now()}-${fileName.replace(/\s+/g, '_')}`;
+  await uploadToS3(s3Key, buffer, mimeType);
+  await new Doc({
+    inquiryId,
+    docType: 'Tender Doc',
+    title: fileName.replace(/\.[^.]+$/, ''),
+    rev: '0',
+    status: 'open',
+    s3Key,
+    fileName,
+    fileSize: buffer.length,
+    mimeType,
+    uploadedBy: 'lead-engine',
+  }).save();
+}
+
+// Copies the tender's files into the inquiry's Stage-1 documents; zip is extracted, entries duplicating loose files skipped
+async function copyTenderDocsToInquiry(tenderName: string, inquiryId: string): Promise<void> {
+  const tender = await ScrapedTender.findOne({ tenderName }).lean();
+  if (!tender) return;
+
+  const loose = tender.files.filter(f => f.mimeType !== 'application/zip');
+  const looseNames = new Set(loose.map(f => f.fileName));
+  for (const f of loose) {
+    const buffer = await downloadFromS3(f.s3Key);
+    await saveInquiryDoc(inquiryId, f.fileName, buffer, f.mimeType);
+  }
+
+  const zip = tender.files.find(f => f.mimeType === 'application/zip');
+  if (!zip) return;
+  for (const entry of new AdmZip(await downloadFromS3(zip.s3Key)).getEntries()) {
+    if (entry.isDirectory || entry.entryName.startsWith('__MACOSX')) continue;
+    const name = entry.entryName.split('/').pop() ?? '';
+    if (!name || name.startsWith('.') || looseNames.has(name)) continue;
+    const ext = name.split('.').pop()?.toLowerCase() ?? '';
+    await saveInquiryDoc(inquiryId, name, entry.getData(), MIME_BY_EXT[ext] ?? 'application/octet-stream');
+  }
+}
+
+async function formatLead(lead: ITenderLead) {
   return {
     tenderName: lead.tenderName,
     scraperId:  lead.scraperId,
@@ -50,7 +103,7 @@ async function formatLead(lead: ITenderLead) {
     dueDate:    lead.dueDate,
     score:      lead.score,
     analysed:   lead.analysed,
-    zipUrl,
+    hasZip:     !!lead.zipS3Key,
     status:          lead.status,
     pushedInquiryId: lead.pushedInquiryId,
     createdAt: lead.createdAt,
@@ -81,6 +134,101 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching scraped tenders:', error);
     res.status(500).json({ error: 'Failed to fetch scraped tenders' });
+  }
+});
+
+// GET /:id/files — presigned URL per file in the tender folder (zip bundle excluded)
+router.get('/:id/files', async (req: Request, res: Response) => {
+  try {
+    const tenderName = decodeURIComponent(req.params.id);
+    const tender = await ScrapedTender.findOne({ tenderName }).lean();
+    if (!tender) {
+      res.status(404).json({ error: 'Tender not found' });
+      return;
+    }
+    const lead = await TenderLead.findOne({ tenderName }).lean();
+    const files = tender.files
+      .filter(f => f.mimeType !== 'application/zip')
+      .map(f => ({
+        fileName: f.fileName,
+        mimeType: f.mimeType,
+        fileSize: f.fileSize,
+        meta: lead?.fileMeta?.[f.fileName] ?? null,
+      }));
+    res.json({ files });
+  } catch (error) {
+    console.error('Error fetching tender files:', error);
+    res.status(500).json({ error: 'Failed to fetch tender files' });
+  }
+});
+
+// GET /:id/files/download?file=NAME (inline) or ?zip=1 (attachment) — streams from S3 by key; keys and S3 URLs never leave the server
+router.get('/:id/files/download', async (req: Request, res: Response) => {
+  try {
+    const tenderName = decodeURIComponent(req.params.id);
+    const tender = await ScrapedTender.findOne({ tenderName }).lean();
+    if (!tender) {
+      res.status(404).json({ error: 'Tender not found' });
+      return;
+    }
+    const file = req.query.zip === '1'
+      ? tender.files.find(f => f.mimeType === 'application/zip')
+      : tender.files.find(f => f.fileName === String(req.query.file ?? ''));
+    if (!file) {
+      res.status(404).json({ error: 'File not found in this tender' });
+      return;
+    }
+    const buffer = await downloadFromS3(file.s3Key);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `${file.mimeType === 'application/zip' ? 'attachment' : 'inline'}; filename="${file.fileName.replace(/"/g, '')}"`
+    );
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error downloading tender file:', error);
+    res.status(500).json({ error: 'Failed to download file' });
+  }
+});
+
+// POST /:id/files/analyse — Gemini metadata extraction for one file, cached on tender_leads.fileMeta
+router.post('/:id/files/analyse', async (req: Request, res: Response) => {
+  try {
+    const tenderName = decodeURIComponent(req.params.id);
+    const fileName = String(req.body?.fileName ?? '');
+    const tender = await ScrapedTender.findOne({ tenderName }).lean();
+    const lead = await TenderLead.findOne({ tenderName });
+    if (!tender || !lead) {
+      res.status(404).json({ error: 'Tender not found' });
+      return;
+    }
+    const file = tender.files.find(f => f.fileName === fileName);
+    if (!file) {
+      res.status(404).json({ error: 'File not found in this tender' });
+      return;
+    }
+    if (file.mimeType !== 'application/pdf') {
+      res.status(400).json({ error: 'Only PDF documents can be analysed' });
+      return;
+    }
+
+    const cached = lead.fileMeta?.[fileName];
+    if (cached) {
+      res.json({ meta: cached });
+      return;
+    }
+
+    const buffer = await downloadFromS3(file.s3Key);
+    const meta = await extractDocMeta(buffer.toString('base64'), file.mimeType);
+
+    lead.fileMeta = { ...(lead.fileMeta ?? {}), [fileName]: meta };
+    lead.markModified('fileMeta');
+    await lead.save();
+
+    res.json({ meta });
+  } catch (error) {
+    console.error('Error analysing tender file:', error);
+    res.status(500).json({ error: (error as Error).message || 'Failed to analyse document' });
   }
 });
 
@@ -222,10 +370,18 @@ router.post('/:id/push-to-sales', async (req: Request, res: Response) => {
       bidDue,
       receivedDate: new Date().toISOString().slice(0, 10),
       source: lead.source,
+      tenderId: lead.tenderId,
       estimator: 'Unassigned',
       completedUpTo: 0,
     });
     const savedInquiry = await inquiry.save();
+
+    try {
+      await copyTenderDocsToInquiry(tenderName, inquiryId);
+    } catch (docErr) {
+      // Inquiry is already created — a doc-copy failure shouldn't fail the push
+      console.error('Error copying tender documents to inquiry:', docErr);
+    }
 
     lead.status = 'pushed';
     lead.pushedInquiryId = inquiryId;
