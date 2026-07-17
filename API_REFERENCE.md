@@ -1,7 +1,7 @@
 # Sales ERP — Backend API Reference
 
-**Base URL (dev):** `http://localhost:3001`  
-**Proxy:** Vite forwards `/api/*` → `http://localhost:3001`, so the frontend can call `/api/...` directly.  
+**Base URL (dev):** `http://localhost:3000`  
+**Proxy:** Vite forwards `/api/*` → `http://localhost:3000`, so the frontend can call `/api/...` directly.  
 **Auth:** None currently.  
 **Content-Type:** `application/json` for all JSON requests. Use `multipart/form-data` only for file uploads (documents).  
 **Encoding:** All `inquiryId` values in URL paths must be `encodeURIComponent`-encoded (they contain `/`).
