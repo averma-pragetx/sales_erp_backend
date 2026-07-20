@@ -8,6 +8,7 @@ import { Stage5Work } from '../models/Stage5Work';
 import { TechQuery }  from '../models/TechQuery';
 import { Stage7Work } from '../models/Stage7Work';
 import { Stage8Work } from '../models/Stage8Work';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -17,7 +18,7 @@ router.get('/', async (_req: Request, res: Response) => {
     const inquiries = await Inquiry.find().lean().sort({ createdAt: -1 });
     res.json(inquiries);
   } catch (error) {
-    console.error('Error fetching inquiries:', error);
+    logger.error('Error fetching inquiries:', error);
     res.status(500).json({ error: 'Failed to fetch inquiries' });
   }
 });
@@ -33,7 +34,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     }
     res.json(inquiry);
   } catch (error) {
-    console.error('Error fetching inquiry:', error);
+    logger.error('Error fetching inquiry:', error);
     res.status(500).json({ error: 'Failed to fetch inquiry' });
   }
 });
@@ -45,7 +46,7 @@ router.post('/', async (req: Request, res: Response) => {
     const saved = await inquiry.save();
     res.status(201).json(saved);
   } catch (error) {
-    console.error('Error creating inquiry:', error);
+    logger.error('Error creating inquiry:', error);
     res.status(400).json({ error: 'Failed to create inquiry', details: error });
   }
 });
@@ -73,7 +74,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     }
     res.json(updated);
   } catch (error) {
-    console.error('Error updating inquiry:', error);
+    logger.error('Error updating inquiry:', error);
     res.status(500).json({ error: 'Failed to update inquiry' });
   }
 });
@@ -120,7 +121,7 @@ router.patch('/:id/kanban', async (req: Request, res: Response) => {
 
     res.json(updated);
   } catch (error) {
-    console.error('Error updating inquiry cluster:', error);
+    logger.error('Error updating inquiry cluster:', error);
     res.status(500).json({ error: 'Failed to update inquiry cluster' });
   }
 });
@@ -146,7 +147,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     ]);
     res.json({ message: 'Inquiry and all related data deleted.' });
   } catch (error) {
-    console.error('Error deleting inquiry:', error);
+    logger.error('Error deleting inquiry:', error);
     res.status(500).json({ error: 'Failed to delete inquiry' });
   }
 });

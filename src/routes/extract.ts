@@ -5,6 +5,7 @@ import { Section } from '../models/Section';
 import { Inquiry } from '../models/Inquiry';
 import { downloadFromS3 } from '../s3';
 import { extractDocument } from '../services/gemini';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -70,7 +71,7 @@ async function runPipeline(docId: string): Promise<void> {
       );
     }
 
-    console.log(
+    logger.info(
       `[extract] ✓ ${doc.docType} — ${doc.title} (${doc.inquiryId}) ` +
       `| ${result.sections.length} sections saved`,
     );
@@ -78,7 +79,7 @@ async function runPipeline(docId: string): Promise<void> {
     doc.processingStatus = 'failed';
     doc.processingError  = String(err);
     await doc.save();
-    console.error(`[extract] ✗ ${docId}:`, err);
+    logger.error(`[extract] ✗ ${docId}:`, err);
   }
 }
 
@@ -110,7 +111,7 @@ router.post('/document/:docId', async (req: Request, res: Response) => {
     statusUrl: `/api/extract/document/${doc._id}`,
   });
 
-  runPipeline(String(doc._id)).catch(console.error);
+  runPipeline(String(doc._id)).catch(err => logger.error('[extract] pipeline failed', err));
 });
 
 // GET /api/extract/document/:docId
@@ -186,7 +187,7 @@ router.post('/inquiry/:inquiryId', async (req: Request, res: Response) => {
       documents: docs,
     });
   } catch (err) {
-    console.error('[extract] inquiry error:', err);
+    logger.error('[extract] inquiry error:', err);
     res.status(500).json({ error: 'Extraction failed.', details: String(err) });
   }
 });

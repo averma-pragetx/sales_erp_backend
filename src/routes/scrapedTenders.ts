@@ -6,6 +6,7 @@ import { Inquiry } from '../models/Inquiry';
 import { Doc } from '../models/Document';
 import { downloadFromS3, uploadToS3 } from '../s3';
 import { extractTenderMeta, extractDocMeta } from '../services/tenderExtract';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -132,7 +133,7 @@ router.get('/', async (req: Request, res: Response) => {
       limit,
     });
   } catch (error) {
-    console.error('Error fetching scraped tenders:', error);
+    logger.error('Error fetching scraped tenders:', error);
     res.status(500).json({ error: 'Failed to fetch scraped tenders' });
   }
 });
@@ -157,7 +158,7 @@ router.get('/:id/files', async (req: Request, res: Response) => {
       }));
     res.json({ files });
   } catch (error) {
-    console.error('Error fetching tender files:', error);
+    logger.error('Error fetching tender files:', error);
     res.status(500).json({ error: 'Failed to fetch tender files' });
   }
 });
@@ -186,7 +187,7 @@ router.get('/:id/files/download', async (req: Request, res: Response) => {
     );
     res.send(buffer);
   } catch (error) {
-    console.error('Error downloading tender file:', error);
+    logger.error('Error downloading tender file:', error);
     res.status(500).json({ error: 'Failed to download file' });
   }
 });
@@ -227,7 +228,7 @@ router.post('/:id/files/analyse', async (req: Request, res: Response) => {
 
     res.json({ meta });
   } catch (error) {
-    console.error('Error analysing tender file:', error);
+    logger.error('Error analysing tender file:', error);
     res.status(500).json({ error: (error as Error).message || 'Failed to analyse document' });
   }
 });
@@ -263,7 +264,7 @@ router.post('/:id/analyse', async (req: Request, res: Response) => {
 
     res.json(await formatLead(lead));
   } catch (error) {
-    console.error('Error analysing tender:', error);
+    logger.error('Error analysing tender:', error);
     res.status(500).json({ error: (error as Error).message || 'Failed to analyse tender' });
   }
 });
@@ -285,7 +286,7 @@ router.patch('/:id/approve', async (req: Request, res: Response) => {
     await lead.save();
     res.json(await formatLead(lead));
   } catch (error) {
-    console.error('Error approving tender:', error);
+    logger.error('Error approving tender:', error);
     res.status(500).json({ error: 'Failed to approve tender' });
   }
 });
@@ -307,7 +308,7 @@ router.patch('/:id/reject', async (req: Request, res: Response) => {
     await lead.save();
     res.json(await formatLead(lead));
   } catch (error) {
-    console.error('Error rejecting tender:', error);
+    logger.error('Error rejecting tender:', error);
     res.status(500).json({ error: 'Failed to reject tender' });
   }
 });
@@ -380,7 +381,7 @@ router.post('/:id/push-to-sales', async (req: Request, res: Response) => {
       await copyTenderDocsToInquiry(tenderName, inquiryId);
     } catch (docErr) {
       // Inquiry is already created — a doc-copy failure shouldn't fail the push
-      console.error('Error copying tender documents to inquiry:', docErr);
+      logger.error('Error copying tender documents to inquiry:', docErr);
     }
 
     lead.status = 'pushed';
@@ -389,7 +390,7 @@ router.post('/:id/push-to-sales', async (req: Request, res: Response) => {
 
     res.json({ tender: await formatLead(lead), inquiry: savedInquiry });
   } catch (error) {
-    console.error('Error pushing tender to sales:', error);
+    logger.error('Error pushing tender to sales:', error);
     res.status(500).json({ error: 'Failed to push tender to sales' });
   }
 });

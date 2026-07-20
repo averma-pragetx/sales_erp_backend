@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Scraper } from '../models/Scraper';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -74,7 +75,7 @@ router.get('/', async (_req: Request, res: Response) => {
       quotaPct: s.quotaPct,
     })));
   } catch (error) {
-    console.error('Error fetching scrapers:', error);
+    logger.error('Error fetching scrapers:', error);
     res.status(500).json({ error: 'Failed to fetch scrapers' });
   }
 });

@@ -8,6 +8,7 @@ export interface ISearchChatMessage {
 
 export interface ISearchChat extends Document {
   title: string;
+  scopeTenderNames: string[];
   messages: ISearchChatMessage[];
   createdAt: Date;
   updatedAt: Date;
@@ -16,6 +17,7 @@ export interface ISearchChat extends Document {
 const SearchChatSchema = new Schema<ISearchChat>(
   {
     title: { type: String, default: 'New chat' },
+    scopeTenderNames: { type: [String], default: [] },
     messages: {
       type: [
         {

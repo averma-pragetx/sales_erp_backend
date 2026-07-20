@@ -5,6 +5,7 @@ import { Inquiry } from '../models/Inquiry';
 import { SearchChat } from '../models/SearchChat';
 import { answerAcrossCorpus, type CorpusDoc } from '../services/contextualSearch';
 import type { ChatTurn, LlmProvider } from '../services/pageIndex';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -58,7 +59,7 @@ router.get('/corpus', async (_req: Request, res: Response) => {
       builtAt:   t.builtAt,
     })));
   } catch (err) {
-    console.error('[search] corpus error:', err);
+    logger.error('[search] corpus error:', err);
     res.status(500).json({ error: 'Failed to fetch corpus.' });
   }
 });
@@ -70,7 +71,7 @@ router.get('/chats', async (_req: Request, res: Response) => {
     const chats = await SearchChat.find().sort({ updatedAt: -1 }).select('title updatedAt').lean();
     res.json(chats.map(c => ({ chatId: String(c._id), title: c.title, updatedAt: c.updatedAt })));
   } catch (err) {
-    console.error('[search] chats list error:', err);
+    logger.error('[search] chats list error:', err);
     res.status(500).json({ error: 'Failed to fetch chats.' });
   }
 });
@@ -81,9 +82,15 @@ router.get('/chats/:chatId', async (req: Request, res: Response) => {
   try {
     const chat = await SearchChat.findById(req.params.chatId).lean();
     if (!chat) { res.status(404).json({ error: 'Chat not found.' }); return; }
-    res.json({ chatId: String(chat._id), title: chat.title, messages: chat.messages, updatedAt: chat.updatedAt });
+    res.json({
+      chatId: String(chat._id),
+      title: chat.title,
+      scopeTenderNames: chat.scopeTenderNames ?? [],
+      messages: chat.messages,
+      updatedAt: chat.updatedAt,
+    });
   } catch (err) {
-    console.error('[search] chat get error:', err);
+    logger.error('[search] chat get error:', err);
     res.status(500).json({ error: 'Failed to fetch chat.' });
   }
 });
@@ -102,7 +109,7 @@ router.patch('/chats/:chatId', async (req: Request, res: Response) => {
     if (!chat) { res.status(404).json({ error: 'Chat not found.' }); return; }
     res.json({ chatId: String(chat._id), title: chat.title, updatedAt: chat.updatedAt });
   } catch (err) {
-    console.error('[search] chat rename error:', err);
+    logger.error('[search] chat rename error:', err);
     res.status(500).json({ error: 'Failed to rename chat.' });
   }
 });
@@ -114,7 +121,7 @@ router.delete('/chats/:chatId', async (req: Request, res: Response) => {
     await SearchChat.findByIdAndDelete(req.params.chatId);
     res.json({ ok: true });
   } catch (err) {
-    console.error('[search] chat delete error:', err);
+    logger.error('[search] chat delete error:', err);
     res.status(500).json({ error: 'Failed to delete chat.' });
   }
 });
@@ -123,10 +130,13 @@ router.delete('/chats/:chatId', async (req: Request, res: Response) => {
 
 router.post('/ask', async (req: Request, res: Response) => {
   try {
-    const { question, history, provider, docIds, chatId } = req.body as { question?: string; history?: ChatTurn[]; provider?: unknown; docIds?: string[]; chatId?: string };
+    const { question, history, provider, docIds, chatId, scopeTenderNames } = req.body as {
+      question?: string; history?: ChatTurn[]; provider?: unknown; docIds?: string[]; chatId?: string; scopeTenderNames?: string[];
+    };
     if (!question || !question.trim()) { res.status(400).json({ error: 'question is required.' }); return; }
 
     const scope = Array.isArray(docIds) ? docIds.filter(id => typeof id === 'string' && id.trim()) : [];
+    logger.debug(`[search] ask "${question.trim().slice(0, 80)}" provider=${parseProvider(provider)} scope=${scope.length || 'all'} chatId=${chatId || 'new'}`);
     const corpus = await loadCorpus(scope);
     if (scope.length > 0 && corpus.length === 0) {
       res.status(404).json({ error: 'None of the selected documents have a built page index.' });
@@ -145,11 +155,18 @@ router.post('/ask', async (req: Request, res: Response) => {
       ? chat.messages.slice(-12).map(m => ({ role: m.role, text: m.text }))
       : Array.isArray(history) ? history : [];
 
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
     const result = await answerAcrossCorpus(
       corpus,
       question.trim(),
       chatHistory,
       parseProvider(provider),
+      token => send({ token }),
     );
 
     const byId = new Map(corpus.map(d => [d.docId, d]));
@@ -160,16 +177,21 @@ router.post('/ask', async (req: Request, res: Response) => {
     }));
 
     if (!chat) chat = new SearchChat({ title: question.trim().slice(0, 80) });
+    if (Array.isArray(scopeTenderNames)) chat.scopeTenderNames = scopeTenderNames.filter(t => typeof t === 'string' && t.trim());
     chat.messages.push(
       { role: 'user', text: question.trim(), sources: [] },
       { role: 'model', text: result.answer, sources },
     );
     await chat.save();
 
-    res.json({ answer: result.answer, sources, chatId: String(chat._id) });
+    logger.info(`[search] ask answered chatId=${chat._id} sources=${sources.length}`);
+    send({ done: true, sources, chatId: String(chat._id) });
+    res.end();
   } catch (err) {
-    console.error('[search] ask error:', err);
-    res.status(500).json({ error: 'Search failed.', details: String(err) });
+    logger.error('[search] ask error:', err);
+    if (!res.headersSent) { res.status(500).json({ error: 'Search failed.', details: String(err) }); return; }
+    res.write(`data: ${JSON.stringify({ error: 'Search failed.' })}\n\n`);
+    res.end();
   }
 });
 

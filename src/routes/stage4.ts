@@ -5,6 +5,7 @@ import { Doc }        from '../models/Document';
 import { Inquiry }    from '../models/Inquiry';
 import { downloadFromS3 } from '../s3';
 import { extractTagList } from '../services/stage4';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -96,7 +97,7 @@ router.post('/:inquiryId/extract', async (req: Request, res: Response) => {
       tags:                work.tags,
     });
   } catch (err) {
-    console.error('[stage4] extract error:', err);
+    logger.error('[stage4] extract error:', err);
 
     // Persist failure
     try {
@@ -145,7 +146,7 @@ router.get('/:inquiryId', async (req: Request, res: Response) => {
       tags:                work.tags,
     });
   } catch (err) {
-    console.error('[stage4] get error:', err);
+    logger.error('[stage4] get error:', err);
     res.status(500).json({ error: 'Failed to fetch Stage 4 work.' });
   }
 });
@@ -168,7 +169,7 @@ router.get('/:inquiryId/tags', async (req: Request, res: Response) => {
 
     res.json({ inquiryId, count: work.tags.length, tags: work.tags });
   } catch (err) {
-    console.error('[stage4] tags error:', err);
+    logger.error('[stage4] tags error:', err);
     res.status(500).json({ error: 'Failed to fetch tags.' });
   }
 });

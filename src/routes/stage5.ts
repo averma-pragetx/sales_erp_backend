@@ -3,6 +3,7 @@ import { Stage5Work } from '../models/Stage5Work';
 import { Inquiry }    from '../models/Inquiry';
 import { Section }    from '../models/Section';
 import { analyseCompliance } from '../services/stage5';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -53,7 +54,7 @@ router.get('/:inquiryId', async (req: Request, res: Response) => {
     }
     res.json(formatWork(work));
   } catch (err) {
-    console.error('[stage5] get error:', err);
+    logger.error('[stage5] get error:', err);
     res.status(500).json({ error: 'Failed to fetch Stage 5 data.' });
   }
 });
@@ -121,7 +122,7 @@ router.post('/:inquiryId/analyse', async (req: Request, res: Response) => {
 
     res.json(formatWork(work));
   } catch (err) {
-    console.error('[stage5] analyse error:', err);
+    logger.error('[stage5] analyse error:', err);
     try {
       const inquiryId = decodeURIComponent(req.params.inquiryId);
       const work = await Stage5Work.findOne({ inquiryId });
@@ -185,7 +186,7 @@ router.post('/:inquiryId/items', async (req: Request, res: Response) => {
 
     res.status(201).json(formatWork(work));
   } catch (err) {
-    console.error('[stage5] add item error:', err);
+    logger.error('[stage5] add item error:', err);
     res.status(500).json({ error: 'Failed to add item.', details: String(err) });
   }
 });
@@ -252,7 +253,7 @@ router.patch('/:inquiryId/items/:itemIndex', async (req: Request, res: Response)
 
     res.json(formatWork(work));
   } catch (err) {
-    console.error('[stage5] patch item error:', err);
+    logger.error('[stage5] patch item error:', err);
     res.status(500).json({ error: 'Failed to update item.', details: String(err) });
   }
 });
@@ -284,7 +285,7 @@ router.delete('/:inquiryId/items/:itemIndex', async (req: Request, res: Response
 
     res.json(formatWork(work));
   } catch (err) {
-    console.error('[stage5] delete item error:', err);
+    logger.error('[stage5] delete item error:', err);
     res.status(500).json({ error: 'Failed to delete item.', details: String(err) });
   }
 });

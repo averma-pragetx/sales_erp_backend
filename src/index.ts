@@ -7,6 +7,7 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 import express from 'express';
 import cors from 'cors';
 import { connectDB } from './db';
+import { logger } from './logger';
 import inquiriesRouter from './routes/inquiries';
 import scrapedTendersRouter from './routes/scrapedTenders';
 import scrapersRouter from './routes/scrapers';
@@ -29,6 +30,14 @@ const PORT = process.env.PORT ?? 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    logger.info(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - start}ms`);
+  });
+  next();
+});
 
 app.use('/api/inquiries', inquiriesRouter);
 app.use('/api/scraped-tenders', scrapedTendersRouter);
@@ -54,11 +63,11 @@ app.get('/health', (_req, res) => {
 async function start(): Promise<void> {
   await connectDB();
   app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    logger.info(`Server running on port ${PORT}`);
   });
 }
 
 start().catch((err) => {
-  console.error('Failed to start server:', err);
+  logger.error('Failed to start server:', err);
   process.exit(1);
 });

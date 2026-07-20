@@ -4,6 +4,7 @@ import { PageIndexTreeVersion } from '../models/PageIndexTreeVersion';
 import { Doc } from '../models/Document';
 import { downloadFromS3 } from '../s3';
 import { extractPageTexts, buildPageIndexTree, repairPageIndexTree, isFixableFlag, answerFromPageIndex, type ChatTurn, type LlmProvider } from '../services/pageIndex';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -57,7 +58,7 @@ router.get('/:docId', async (req: Request, res: Response) => {
     }
     res.json(formatTree(work));
   } catch (err) {
-    console.error('[pageindex] get error:', err);
+    logger.error('[pageindex] get error:', err);
     res.status(500).json({ error: 'Failed to fetch page index.' });
   }
 });
@@ -108,7 +109,7 @@ router.post('/:docId/build', async (req: Request, res: Response) => {
 
     res.json(formatTree(work));
   } catch (err) {
-    console.error('[pageindex] build error:', err);
+    logger.error('[pageindex] build error:', err);
     try {
       const work = await PageIndexTree.findOne({ documentId: req.params.docId });
       if (work) { work.status = 'failed'; work.error = String(err); await work.save(); }
@@ -162,7 +163,7 @@ router.post('/:docId/repair', async (req: Request, res: Response) => {
 
     res.json(formatTree(work));
   } catch (err) {
-    console.error('[pageindex] repair error:', err);
+    logger.error('[pageindex] repair error:', err);
     try {
       const work = await PageIndexTree.findOne({ documentId: req.params.docId });
       if (work) { work.status = 'failed'; work.error = String(err); await work.save(); }
@@ -184,7 +185,7 @@ router.get('/:docId/versions', async (req: Request, res: Response) => {
       .lean();
     res.json(versions);
   } catch (err) {
-    console.error('[pageindex] versions error:', err);
+    logger.error('[pageindex] versions error:', err);
     res.status(500).json({ error: 'Failed to fetch version history.' });
   }
 });
@@ -213,7 +214,7 @@ router.post('/:docId/chat', async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (err) {
-    console.error('[pageindex] chat error:', err);
+    logger.error('[pageindex] chat error:', err);
     res.status(500).json({ error: 'Chat failed.', details: String(err) });
   }
 });

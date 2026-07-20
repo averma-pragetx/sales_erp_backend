@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Section } from '../models/Section';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -42,7 +43,7 @@ router.get('/inquiry/:inquiryId', async (req: Request, res: Response) => {
       documents: Object.values(byDocument),
     });
   } catch (err) {
-    console.error('[sections] inquiry list error:', err);
+    logger.error('[sections] inquiry list error:', err);
     res.status(500).json({ error: 'Failed to fetch sections.' });
   }
 });
@@ -62,7 +63,7 @@ router.get('/document/:docId', async (req: Request, res: Response) => {
 
     res.json(sections);
   } catch (err) {
-    console.error('[sections] document list error:', err);
+    logger.error('[sections] document list error:', err);
     res.status(500).json({ error: 'Failed to fetch sections.' });
   }
 });
@@ -84,7 +85,7 @@ router.get('/:sectionId', async (req: Request, res: Response) => {
 
     res.json(section);
   } catch (err) {
-    console.error('[sections] get error:', err);
+    logger.error('[sections] get error:', err);
     res.status(500).json({ error: 'Failed to fetch section.' });
   }
 });
@@ -137,7 +138,7 @@ router.patch('/:sectionId', async (req: Request, res: Response) => {
 
     res.json(section);
   } catch (err) {
-    console.error('[sections] update error:', err);
+    logger.error('[sections] update error:', err);
     res.status(500).json({ error: 'Failed to update section.' });
   }
 });
@@ -159,7 +160,7 @@ router.delete('/:sectionId', async (req: Request, res: Response) => {
 
     res.json({ message: 'Section deleted.', sectionId: req.params.sectionId });
   } catch (err) {
-    console.error('[sections] delete error:', err);
+    logger.error('[sections] delete error:', err);
     res.status(500).json({ error: 'Failed to delete section.' });
   }
 });

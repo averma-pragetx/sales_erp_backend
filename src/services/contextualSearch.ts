@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import type { IPageIndexNode } from '../models/PageIndexTree';
 import { searchDocument, type ChatTurn } from './pageIndex';
 import { getGemini, getOpenAI, GEMINI_MODEL, OPENAI_MODEL, type LlmProvider } from '../ai/clients';
+import { logger } from '../logger';
 
 export interface CorpusDoc {
   docId: string;
@@ -150,11 +151,20 @@ function runTool(
   docs: CorpusDoc[],
   pagesUsed: Map<string, Set<number>>,
 ): string {
-  if (name === 'search_corpus') return searchCorpus(docs, args?.query);
-  return fetchPages(docs, args?.docId, args?.startPage, args?.endPage, pagesUsed);
+  logger.debug(`[contextualSearch] tool ${name}`, args);
+  const result = name === 'search_corpus'
+    ? searchCorpus(docs, args?.query)
+    : fetchPages(docs, args?.docId, args?.startPage, args?.endPage, pagesUsed);
+  logger.debug(`[contextualSearch] tool ${name} -> ${result.length} chars`);
+  return result;
 }
 
-async function askGemini(docs: CorpusDoc[], question: string, history: ChatTurn[]): Promise<SearchResult> {
+async function askGemini(
+  docs: CorpusDoc[],
+  question: string,
+  history: ChatTurn[],
+  onToken?: (delta: string) => void,
+): Promise<SearchResult> {
   const ai = getGemini();
   const pagesUsed = new Map<string, Set<number>>();
   const systemInstruction = buildSystemInstruction(docs);
@@ -167,7 +177,7 @@ async function askGemini(docs: CorpusDoc[], question: string, history: ChatTurn[
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
     const isLastTurn = turn === MAX_TOOL_TURNS - 1;
-    const res = await ai.models.generateContent({
+    const stream = await ai.models.generateContentStream({
       model: GEMINI_MODEL,
       contents,
       config: isLastTurn
@@ -181,9 +191,20 @@ async function askGemini(docs: CorpusDoc[], question: string, history: ChatTurn[
           },
     });
 
-    const calls = res.functionCalls ?? [];
+    // ponytail: prompt forbids mixing prose + a tool call in one turn, so a chunk
+    // is either pure text (stream it live) or a function call (buffer, no flush).
+    let text = '';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const calls: any[] = [];
+    for await (const chunk of stream) {
+      const chunkCalls = chunk.functionCalls;
+      if (chunkCalls && chunkCalls.length > 0) { calls.push(...chunkCalls); continue; }
+      const t = chunk.text;
+      if (t) { text += t; onToken?.(t); }
+    }
+
     if (calls.length === 0) {
-      return { answer: res.text?.trim() || NO_ANSWER, sources: collectSources(pagesUsed) };
+      return { answer: text.trim() || NO_ANSWER, sources: collectSources(pagesUsed) };
     }
 
     contents.push({ role: 'model', parts: calls.map(c => ({ functionCall: c })) });
@@ -231,7 +252,14 @@ const TOOLS_OPENAI: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ];
 
-async function askOpenAI(docs: CorpusDoc[], question: string, history: ChatTurn[]): Promise<SearchResult> {
+interface StreamedToolCall { id?: string; name?: string; args: string }
+
+async function askOpenAI(
+  docs: CorpusDoc[],
+  question: string,
+  history: ChatTurn[],
+  onToken?: (delta: string) => void,
+): Promise<SearchResult> {
   const ai = getOpenAI();
   const pagesUsed = new Map<string, Set<number>>();
 
@@ -243,23 +271,39 @@ async function askOpenAI(docs: CorpusDoc[], question: string, history: ChatTurn[
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
     const isLastTurn = turn === MAX_TOOL_TURNS - 1;
-    const res = await ai.chat.completions.create(
+    const stream = await ai.chat.completions.create(
       isLastTurn
-        ? { model: OPENAI_MODEL, messages }
-        : { model: OPENAI_MODEL, messages, tools: TOOLS_OPENAI, tool_choice: turn === 0 ? 'required' : 'auto' },
+        ? { model: OPENAI_MODEL, messages, stream: true }
+        : { model: OPENAI_MODEL, messages, tools: TOOLS_OPENAI, tool_choice: turn === 0 ? 'required' : 'auto', stream: true },
     );
 
-    const msg = res.choices[0].message;
-    const toolCalls = msg.tool_calls ?? [];
-    if (toolCalls.length === 0) {
-      return { answer: msg.content?.trim() || NO_ANSWER, sources: collectSources(pagesUsed) };
+    let text = '';
+    const toolCallsAcc: StreamedToolCall[] = [];
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+      if (!delta) continue;
+      if (delta.content) { text += delta.content; onToken?.(delta.content); }
+      for (const tc of delta.tool_calls ?? []) {
+        const slot = toolCallsAcc[tc.index] ?? (toolCallsAcc[tc.index] = { args: '' });
+        if (tc.id) slot.id = tc.id;
+        if (tc.function?.name) slot.name = (slot.name ?? '') + tc.function.name;
+        if (tc.function?.arguments) slot.args += tc.function.arguments;
+      }
     }
 
-    messages.push({ role: 'assistant', content: msg.content, tool_calls: toolCalls });
-    for (const call of toolCalls) {
-      if (call.type !== 'function') continue;
-      const args = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>;
-      messages.push({ role: 'tool', tool_call_id: call.id, content: runTool(call.function.name, args, docs, pagesUsed) });
+    const toolCalls = toolCallsAcc.filter(Boolean);
+    if (toolCalls.length === 0) {
+      return { answer: text.trim() || NO_ANSWER, sources: collectSources(pagesUsed) };
+    }
+
+    messages.push({
+      role: 'assistant',
+      content: text || null,
+      tool_calls: toolCalls.map(t => ({ id: t.id!, type: 'function', function: { name: t.name!, arguments: t.args } })),
+    });
+    for (const t of toolCalls) {
+      const args = JSON.parse(t.args || '{}') as Record<string, unknown>;
+      messages.push({ role: 'tool', tool_call_id: t.id!, content: runTool(t.name, args, docs, pagesUsed) });
     }
   }
 
@@ -271,8 +315,9 @@ export async function answerAcrossCorpus(
   question: string,
   history: ChatTurn[],
   provider: LlmProvider,
+  onToken?: (delta: string) => void,
 ): Promise<SearchResult> {
   return provider === 'openai'
-    ? askOpenAI(docs, question, history)
-    : askGemini(docs, question, history);
+    ? askOpenAI(docs, question, history, onToken)
+    : askGemini(docs, question, history, onToken);
 }

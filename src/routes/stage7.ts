@@ -6,6 +6,7 @@ import { Doc }         from '../models/Document';
 import { downloadFromS3 } from '../s3';
 import { extractBom }  from '../services/stage7';
 import { applyEquipmentCosts } from '../services/costEstimation';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -40,7 +41,7 @@ router.get('/:inquiryId', async (req: Request, res: Response) => {
     }
     res.json(formatWork(work));
   } catch (err) {
-    console.error('[stage7] get error:', err);
+    logger.error('[stage7] get error:', err);
     res.status(500).json({ error: 'Failed to fetch BOM.' });
   }
 });
@@ -92,7 +93,7 @@ router.post('/:inquiryId/extract', async (req: Request, res: Response) => {
 
     res.json(formatWork(work));
   } catch (err) {
-    console.error('[stage7] extract error:', err);
+    logger.error('[stage7] extract error:', err);
     try {
       const inquiryId = decodeURIComponent(req.params.inquiryId);
       const work = await Stage7Work.findOne({ inquiryId });
@@ -116,7 +117,7 @@ router.post('/:inquiryId/estimate-cost', async (req: Request, res: Response) => 
     await work.save();
     res.json(formatWork(work));
   } catch (err) {
-    console.error('[stage7] estimate-cost error:', err);
+    logger.error('[stage7] estimate-cost error:', err);
     res.status(500).json({ error: 'Cost estimation failed.', details: String(err) });
   }
 });

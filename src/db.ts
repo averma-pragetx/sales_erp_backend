@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { logger } from './logger';
 
 export async function connectDB(): Promise<void> {
   const uri = process.env.MONGODB_URI;
@@ -13,9 +14,9 @@ export async function connectDB(): Promise<void> {
       socketTimeoutMS:          45000, // drop stale sockets after 45s
       bufferCommands:           false, // throw immediately if disconnected rather than queuing
     });
-    console.log('MongoDB connected successfully');
+    logger.info('MongoDB connected successfully');
   } catch (error) {
-    console.error('MongoDB connection error:', error);
+    logger.error('MongoDB connection error:', error);
     process.exit(1);
   }
 }

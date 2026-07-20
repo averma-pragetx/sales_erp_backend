@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { Doc } from '../models/Document';
 import { uploadToS3, getPresignedUrl } from '../s3';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -49,7 +50,7 @@ router.get('/inquiry/:inquiryId', async (req: Request, res: Response) => {
     const result = await Promise.all(docs.map(withPresignedUrl));
     res.json(result);
   } catch (err) {
-    console.error('[documents] list error:', err);
+    logger.error('[documents] list error:', err);
     res.status(500).json({ error: 'Failed to fetch documents.' });
   }
 });
@@ -65,7 +66,7 @@ router.get('/:docId', async (req: Request, res: Response) => {
     const result = await withPresignedUrl(doc);
     res.json(result);
   } catch (err) {
-    console.error('[documents] get error:', err);
+    logger.error('[documents] get error:', err);
     res.status(500).json({ error: 'Failed to fetch document.' });
   }
 });
@@ -97,7 +98,7 @@ router.get('/:docId/analysis', async (req: Request, res: Response) => {
       updatedAt: doc.updatedAt,
     });
   } catch (err) {
-    console.error('[documents] analysis error:', err);
+    logger.error('[documents] analysis error:', err);
     res.status(500).json({ error: 'Failed to fetch analysis.' });
   }
 });
@@ -145,7 +146,7 @@ router.post(
       const { s3Key: _k, ...publicDoc } = doc.toObject();
       res.status(201).json({ ...publicDoc, presignedUrl, hasFile: true });
     } catch (err) {
-      console.error('[documents] upload error:', err);
+      logger.error('[documents] upload error:', err);
       res.status(500).json({ error: 'Failed to upload document.' });
     }
   },
@@ -158,7 +159,7 @@ router.delete('/:docId', async (req: Request, res: Response) => {
     if (!doc) { res.status(404).json({ error: 'Document not found.' }); return; }
     res.json({ message: 'Document deleted.' });
   } catch (err) {
-    console.error('[documents] delete error:', err);
+    logger.error('[documents] delete error:', err);
     res.status(500).json({ error: 'Failed to delete document.' });
   }
 });

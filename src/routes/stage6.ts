@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { TechQuery } from '../models/TechQuery';
 import { Inquiry }   from '../models/Inquiry';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -37,7 +38,7 @@ router.get('/:inquiryId', async (req: Request, res: Response) => {
     const tqs = await TechQuery.find({ inquiryId }).sort({ tqIndex: 1 }).lean();
     res.json({ inquiryId, summary: buildSummary(tqs), tqs });
   } catch (err) {
-    console.error('[stage6] list error:', err);
+    logger.error('[stage6] list error:', err);
     res.status(500).json({ error: 'Failed to fetch tech queries.' });
   }
 });
@@ -92,7 +93,7 @@ router.post('/:inquiryId/tq', async (req: Request, res: Response) => {
 
     res.status(201).json(tq);
   } catch (err) {
-    console.error('[stage6] create error:', err);
+    logger.error('[stage6] create error:', err);
     res.status(500).json({ error: 'Failed to create tech query.', details: String(err) });
   }
 });
@@ -113,7 +114,7 @@ router.get('/:inquiryId/tq/:tqId', async (req: Request, res: Response) => {
     }
     res.json(tq);
   } catch (err) {
-    console.error('[stage6] get tq error:', err);
+    logger.error('[stage6] get tq error:', err);
     res.status(500).json({ error: 'Failed to fetch tech query.' });
   }
 });
@@ -190,7 +191,7 @@ router.patch('/:inquiryId/tq/:tqId', async (req: Request, res: Response) => {
     await tq.save();
     res.json(tq);
   } catch (err) {
-    console.error('[stage6] patch error:', err);
+    logger.error('[stage6] patch error:', err);
     res.status(500).json({ error: 'Failed to update tech query.', details: String(err) });
   }
 });
@@ -213,7 +214,7 @@ router.delete('/:inquiryId/tq/:tqId', async (req: Request, res: Response) => {
 
     res.json({ message: `${tq.tqNumber} deleted.`, tqId: req.params.tqId });
   } catch (err) {
-    console.error('[stage6] delete error:', err);
+    logger.error('[stage6] delete error:', err);
     res.status(500).json({ error: 'Failed to delete tech query.' });
   }
 });

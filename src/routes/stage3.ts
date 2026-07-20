@@ -3,6 +3,7 @@ import { Stage3Work }  from '../models/Stage3Work';
 import { Section }     from '../models/Section';
 import { Inquiry }     from '../models/Inquiry';
 import { analyseGaps, draftEmail } from '../services/stage3';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -37,7 +38,7 @@ router.get('/:inquiryId', async (req: Request, res: Response) => {
     }
     res.json(work);
   } catch (err) {
-    console.error('[stage3] get error:', err);
+    logger.error('[stage3] get error:', err);
     res.status(500).json({ error: 'Failed to fetch stage 3 work.' });
   }
 });
@@ -95,7 +96,7 @@ router.post('/:inquiryId/analyse', async (req: Request, res: Response) => {
 
     res.json(work.gapAnalysis);
   } catch (err) {
-    console.error('[stage3] analyse error:', err);
+    logger.error('[stage3] analyse error:', err);
 
     // Persist failure
     try {
@@ -124,7 +125,7 @@ router.get('/:inquiryId/analyse', async (req: Request, res: Response) => {
     }
     res.json(work.gapAnalysis);
   } catch (err) {
-    console.error('[stage3] get analyse error:', err);
+    logger.error('[stage3] get analyse error:', err);
     res.status(500).json({ error: 'Failed to fetch gap analysis.' });
   }
 });
@@ -200,7 +201,7 @@ router.post('/:inquiryId/email', async (req: Request, res: Response) => {
 
     res.json(work.emailDraft);
   } catch (err) {
-    console.error('[stage3] email error:', err);
+    logger.error('[stage3] email error:', err);
 
     try {
       const inquiryId = decodeURIComponent(req.params.inquiryId);
@@ -228,7 +229,7 @@ router.get('/:inquiryId/email', async (req: Request, res: Response) => {
     }
     res.json(work.emailDraft);
   } catch (err) {
-    console.error('[stage3] get email error:', err);
+    logger.error('[stage3] get email error:', err);
     res.status(500).json({ error: 'Failed to fetch email draft.' });
   }
 });

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Stage8Work } from '../models/Stage8Work';
 import { Inquiry }    from '../models/Inquiry';
 import { draftProposal } from '../services/stage8';
+import { logger } from '../logger';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ router.get('/:inquiryId', async (req: Request, res: Response) => {
       editedAt:   work.editedAt,
     });
   } catch (err) {
-    console.error('[stage8] get error:', err);
+    logger.error('[stage8] get error:', err);
     res.status(500).json({ error: 'Failed to fetch proposal.' });
   }
 });
@@ -83,7 +84,7 @@ router.post('/:inquiryId/draft', async (req: Request, res: Response) => {
       editedAt:   work.editedAt,
     });
   } catch (err) {
-    console.error('[stage8] draft error:', err);
+    logger.error('[stage8] draft error:', err);
 
     try {
       const inquiryId = decodeURIComponent(req.params.inquiryId);
@@ -135,7 +136,7 @@ router.patch('/:inquiryId', async (req: Request, res: Response) => {
       editedAt:   work.editedAt,
     });
   } catch (err) {
-    console.error('[stage8] patch error:', err);
+    logger.error('[stage8] patch error:', err);
     res.status(500).json({ error: 'Failed to update proposal.', details: String(err) });
   }
 });
