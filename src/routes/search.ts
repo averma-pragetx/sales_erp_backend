@@ -10,7 +10,7 @@ import { logger } from '../logger';
 const router = Router();
 
 function parseProvider(value: unknown): LlmProvider {
-  return value === 'openai' ? 'openai' : 'gemini';
+  return value === 'openai' || value === 'claude' ? value : 'gemini';
 }
 
 // ponytail: loads every done tree's pageTexts into memory per request — fine at

@@ -15,7 +15,7 @@ export interface IPageIndexTree extends Document {
 
   status: 'pending' | 'processing' | 'done' | 'failed';
   error:  string;
-  provider: 'gemini' | 'openai';
+  provider: 'gemini' | 'openai' | 'claude';
 
   pageCount:  number;
   docSummary: string;
@@ -37,7 +37,7 @@ const PageIndexTreeSchema = new Schema<IPageIndexTree>(
 
     status:   { type: String, enum: ['pending', 'processing', 'done', 'failed'], default: 'pending' },
     error:    { type: String, default: '' },
-    provider: { type: String, enum: ['gemini', 'openai'], default: 'gemini' },
+    provider: { type: String, enum: ['gemini', 'openai', 'claude'], default: 'gemini' },
 
     pageCount:  { type: Number, default: 0 },
     docSummary: { type: String, default: '' },

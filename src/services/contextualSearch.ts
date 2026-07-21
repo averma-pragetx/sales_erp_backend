@@ -1,8 +1,9 @@
 import { Type, FunctionCallingConfigMode } from '@google/genai';
 import OpenAI from 'openai';
+import type Anthropic from '@anthropic-ai/sdk';
 import type { IPageIndexNode } from '../models/PageIndexTree';
 import { searchDocument, type ChatTurn } from './pageIndex';
-import { getGemini, getOpenAI, GEMINI_MODEL, OPENAI_MODEL, type LlmProvider } from '../ai/clients';
+import { getGemini, getOpenAI, getClaude, GEMINI_MODEL, OPENAI_MODEL, CLAUDE_MODEL, type LlmProvider } from '../ai/clients';
 import { logger } from '../logger';
 
 export interface CorpusDoc {
@@ -310,6 +311,80 @@ async function askOpenAI(
   return { answer: NO_ANSWER, sources: collectSources(pagesUsed) };
 }
 
+const TOOLS_CLAUDE: Anthropic.Tool[] = [
+  {
+    name: 'search_corpus',
+    description: 'Case-insensitive keyword/phrase search across every page of every indexed document. Returns matching documents, page numbers, and surrounding snippets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'A specific word or short phrase, e.g. a tag number, material grade, or clause reference.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_page_content',
+    description: 'Fetch the raw text of a page range from one document in the corpus. Keep the range tight.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        docId:     { type: 'string',  description: 'docId from the catalog or a search_corpus result.' },
+        startPage: { type: 'integer', description: '1-based inclusive start page.' },
+        endPage:   { type: 'integer', description: '1-based inclusive end page.' },
+      },
+      required: ['docId', 'startPage', 'endPage'],
+    },
+  },
+];
+
+async function askClaude(
+  docs: CorpusDoc[],
+  question: string,
+  history: ChatTurn[],
+  onToken?: (delta: string) => void,
+): Promise<SearchResult> {
+  const ai = getClaude();
+  const pagesUsed = new Map<string, Set<number>>();
+  const system = buildSystemInstruction(docs);
+
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map(h => ({ role: h.role === 'model' ? 'assistant' as const : 'user' as const, content: h.text })),
+    { role: 'user', content: question },
+  ];
+
+  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+    const isLastTurn = turn === MAX_TOOL_TURNS - 1;
+    const stream = ai.messages.stream({
+      model: CLAUDE_MODEL,
+      max_tokens: 4096,
+      system,
+      messages,
+      ...(isLastTurn ? {} : { tools: TOOLS_CLAUDE, tool_choice: turn === 0 ? { type: 'any' as const } : { type: 'auto' as const } }),
+    });
+    stream.on('text', delta => onToken?.(delta));
+    const res = await stream.finalMessage();
+
+    const toolUses = res.content.filter(b => b.type === 'tool_use');
+    if (toolUses.length === 0) {
+      const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
+      return { answer: text || NO_ANSWER, sources: collectSources(pagesUsed) };
+    }
+
+    messages.push({ role: 'assistant', content: res.content });
+    messages.push({
+      role: 'user',
+      content: toolUses.map(t => ({
+        type: 'tool_result' as const,
+        tool_use_id: t.id,
+        content: runTool(t.name, t.input as Record<string, unknown>, docs, pagesUsed),
+      })),
+    });
+  }
+
+  return { answer: NO_ANSWER, sources: collectSources(pagesUsed) };
+}
+
 export async function answerAcrossCorpus(
   docs: CorpusDoc[],
   question: string,
@@ -317,7 +392,7 @@ export async function answerAcrossCorpus(
   provider: LlmProvider,
   onToken?: (delta: string) => void,
 ): Promise<SearchResult> {
-  return provider === 'openai'
-    ? askOpenAI(docs, question, history, onToken)
-    : askGemini(docs, question, history, onToken);
+  if (provider === 'openai') return askOpenAI(docs, question, history, onToken);
+  if (provider === 'claude') return askClaude(docs, question, history, onToken);
+  return askGemini(docs, question, history, onToken);
 }

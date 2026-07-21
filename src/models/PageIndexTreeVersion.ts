@@ -12,7 +12,7 @@ export interface IPageIndexTreeVersion extends Document {
   versionNumber: number; // 1-based, increments per document
 
   action:   'build' | 'repair';
-  provider: 'gemini' | 'openai';
+  provider: 'gemini' | 'openai' | 'claude';
 
   pageCount:    number;
   docSummary:   string;
@@ -28,7 +28,7 @@ const PageIndexTreeVersionSchema = new Schema<IPageIndexTreeVersion>(
     versionNumber: { type: Number, required: true },
 
     action:   { type: String, enum: ['build', 'repair'], required: true },
-    provider: { type: String, enum: ['gemini', 'openai'], required: true },
+    provider: { type: String, enum: ['gemini', 'openai', 'claude'], required: true },
 
     pageCount:    { type: Number, default: 0 },
     docSummary:   { type: String, default: '' },

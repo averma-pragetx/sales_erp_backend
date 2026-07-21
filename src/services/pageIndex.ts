@@ -1,8 +1,9 @@
 import { Type, FunctionCallingConfigMode } from '@google/genai';
 import type OpenAI from 'openai';
+import type Anthropic from '@anthropic-ai/sdk';
 import { PDFParse } from 'pdf-parse';
 import type { IPageIndexNode } from '../models/PageIndexTree';
-import { getGemini, getOpenAI, GEMINI_MODEL, OPENAI_MODEL, type LlmProvider } from '../ai/clients';
+import { getGemini, getOpenAI, getClaude, GEMINI_MODEL, OPENAI_MODEL, CLAUDE_MODEL, type LlmProvider } from '../ai/clients';
 
 export type { LlmProvider };
 
@@ -196,7 +197,8 @@ const TREE_SCHEMA = {
 
 function parseTreeJson(raw: string, provider: string): RawTree {
   try {
-    return JSON.parse(raw) as RawTree;
+    const cleaned = raw.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '').trim();
+    return JSON.parse(cleaned) as RawTree;
   } catch (err) {
     throw new Error(
       `${provider} returned malformed tree JSON (${(err as Error).message}). This usually means the response ` +
@@ -263,8 +265,29 @@ async function callTreeOpenAI(instructions: string): Promise<RawTree> {
   return parseTreeJson(raw, 'OpenAI');
 }
 
+async function callTreeClaude(instructions: string): Promise<RawTree> {
+  const ai = getClaude();
+
+  const res = await ai.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 16384,
+    system: TREE_JSON_SHAPE,
+    messages: [{ role: 'user', content: instructions }],
+  });
+
+  if (res.stop_reason === 'max_tokens') {
+    throw new Error('Claude hit the output token limit while building the tree — this document has too many sections to index in one pass.');
+  }
+
+  const raw = res.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  if (!raw) throw new Error('Claude returned an empty tree.');
+  return parseTreeJson(raw, 'Claude');
+}
+
 async function runTreeCall(instructions: string, provider: LlmProvider): Promise<RawTree> {
-  return provider === 'openai' ? callTreeOpenAI(instructions) : callTreeGemini(instructions);
+  if (provider === 'openai') return callTreeOpenAI(instructions);
+  if (provider === 'claude') return callTreeClaude(instructions);
+  return callTreeGemini(instructions);
 }
 
 function finalizeTree(raw: RawTree, pageTexts: string[]): { docSummary: string; tree: IPageIndexNode[]; qualityFlags: string[] } {
@@ -601,6 +624,84 @@ async function answerOpenAI(
   };
 }
 
+const RETRIEVAL_TOOLS_CLAUDE: Anthropic.Tool[] = [
+  {
+    name: 'get_page_content',
+    description: GET_PAGES_TOOL_OPENAI.function.description!,
+    input_schema: {
+      type: 'object',
+      properties: {
+        startPage: { type: 'integer', description: '1-based inclusive start page.' },
+        endPage:   { type: 'integer', description: '1-based inclusive end page.' },
+      },
+      required: ['startPage', 'endPage'],
+    },
+  },
+  {
+    name: 'search_document',
+    description: SEARCH_TOOL_OPENAI.function.description!,
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'A specific word or short phrase to search for, e.g. a tag number or clause reference.' },
+      },
+      required: ['query'],
+    },
+  },
+];
+
+async function answerClaude(
+  tree: IPageIndexNode[],
+  docSummary: string,
+  pageTexts: string[],
+  question: string,
+  history: ChatTurn[],
+): Promise<{ answer: string; pagesUsed: number[] }> {
+  const ai = getClaude();
+  const pagesUsed = new Set<number>();
+  const system = buildSystemInstruction(tree, docSummary);
+
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map(h => ({ role: h.role === 'model' ? 'assistant' as const : 'user' as const, content: h.text })),
+    { role: 'user', content: question },
+  ];
+
+  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+    const isLastTurn = turn === MAX_TOOL_TURNS - 1;
+    const res = await ai.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 4096,
+      system,
+      messages,
+      ...(isLastTurn ? {} : { tools: RETRIEVAL_TOOLS_CLAUDE, tool_choice: turn === 0 ? { type: 'any' as const } : { type: 'auto' as const } }),
+    });
+
+    const toolUses = res.content.filter(b => b.type === 'tool_use');
+    if (toolUses.length === 0) {
+      const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
+      return {
+        answer: text || 'I was unable to find enough information in this document to answer confidently.',
+        pagesUsed: [...pagesUsed].sort((a, b) => a - b),
+      };
+    }
+
+    messages.push({ role: 'assistant', content: res.content });
+    messages.push({
+      role: 'user',
+      content: toolUses.map(t => ({
+        type: 'tool_result' as const,
+        tool_use_id: t.id,
+        content: runToolOpenAI(t.name, t.input as { startPage?: unknown; endPage?: unknown; query?: unknown }, pageTexts, pagesUsed),
+      })),
+    });
+  }
+
+  return {
+    answer:    'I was unable to find enough information in this document to answer confidently.',
+    pagesUsed: [...pagesUsed].sort((a, b) => a - b),
+  };
+}
+
 export async function answerFromPageIndex(
   tree:       IPageIndexNode[],
   docSummary: string,
@@ -609,7 +710,7 @@ export async function answerFromPageIndex(
   history:    ChatTurn[],
   provider:   LlmProvider,
 ): Promise<{ answer: string; pagesUsed: number[] }> {
-  return provider === 'openai'
-    ? answerOpenAI(tree, docSummary, pageTexts, question, history)
-    : answerGemini(tree, docSummary, pageTexts, question, history);
+  if (provider === 'openai') return answerOpenAI(tree, docSummary, pageTexts, question, history);
+  if (provider === 'claude') return answerClaude(tree, docSummary, pageTexts, question, history);
+  return answerGemini(tree, docSummary, pageTexts, question, history);
 }

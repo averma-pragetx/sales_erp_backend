@@ -9,7 +9,7 @@ import { logger } from '../logger';
 const router = Router();
 
 function parseProvider(value: unknown): LlmProvider {
-  return value === 'openai' ? 'openai' : 'gemini';
+  return value === 'openai' || value === 'claude' ? value : 'gemini';
 }
 
 function formatTree(work: InstanceType<typeof PageIndexTree>) {
