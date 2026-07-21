@@ -6,6 +6,8 @@ import { Inquiry } from '../models/Inquiry';
 import { Doc } from '../models/Document';
 import { downloadFromS3, uploadToS3 } from '../s3';
 import { extractTenderMeta, extractDocMeta } from '../services/tenderExtract';
+import { runIndexBuild } from './pageIndex';
+import type { LlmProvider } from '../services/pageIndex';
 import { logger } from '../logger';
 
 const router = Router();
@@ -50,10 +52,10 @@ const MIME_BY_EXT: Record<string, string> = {
   jpeg: 'image/jpeg',
 };
 
-async function saveInquiryDoc(inquiryId: string, fileName: string, buffer: Buffer, mimeType: string): Promise<void> {
+async function saveInquiryDoc(inquiryId: string, fileName: string, buffer: Buffer, mimeType: string) {
   const s3Key = `inquiries/${inquiryId}/${Date.now()}-${fileName.replace(/\s+/g, '_')}`;
   await uploadToS3(s3Key, buffer, mimeType);
-  await new Doc({
+  return new Doc({
     inquiryId,
     docType: 'Tender Doc',
     title: fileName.replace(/\.[^.]+$/, ''),
@@ -65,6 +67,27 @@ async function saveInquiryDoc(inquiryId: string, fileName: string, buffer: Buffe
     mimeType,
     uploadedBy: 'lead-engine',
   }).save();
+}
+
+function parseProvider(value: unknown): LlmProvider {
+  return value === 'openai' || value === 'claude' ? value : 'gemini';
+}
+
+// The scraper's loose top-level file is a "tender details" cover page — the
+// real tender documents (specs, drawings, BOQs) are bundled in the zip.
+async function loadZipEntries(tenderName: string) {
+  const tender = await ScrapedTender.findOne({ tenderName }).lean();
+  const zipFile = tender?.files.find(f => f.mimeType === 'application/zip');
+  if (!zipFile) return [];
+  return new AdmZip(await downloadFromS3(zipFile.s3Key)).getEntries()
+    .filter(e => !e.isDirectory && !e.entryName.startsWith('__MACOSX'))
+    .map(entry => ({ name: entry.entryName.split('/').pop() ?? '', entry }))
+    .filter(e => e.name && !e.name.startsWith('.'));
+}
+
+function inferMimeType(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
+  return MIME_BY_EXT[ext] ?? 'application/octet-stream';
 }
 
 // Copies the tender's files into the inquiry's Stage-1 documents; zip is extracted, entries duplicating loose files skipped
@@ -79,14 +102,9 @@ async function copyTenderDocsToInquiry(tenderName: string, inquiryId: string): P
     await saveInquiryDoc(inquiryId, f.fileName, buffer, f.mimeType);
   }
 
-  const zip = tender.files.find(f => f.mimeType === 'application/zip');
-  if (!zip) return;
-  for (const entry of new AdmZip(await downloadFromS3(zip.s3Key)).getEntries()) {
-    if (entry.isDirectory || entry.entryName.startsWith('__MACOSX')) continue;
-    const name = entry.entryName.split('/').pop() ?? '';
-    if (!name || name.startsWith('.') || looseNames.has(name)) continue;
-    const ext = name.split('.').pop()?.toLowerCase() ?? '';
-    await saveInquiryDoc(inquiryId, name, entry.getData(), MIME_BY_EXT[ext] ?? 'application/octet-stream');
+  for (const { name, entry } of await loadZipEntries(tenderName)) {
+    if (looseNames.has(name)) continue;
+    await saveInquiryDoc(inquiryId, name, entry.getData(), inferMimeType(name));
   }
 }
 
@@ -163,6 +181,22 @@ router.get('/:id/files', async (req: Request, res: Response) => {
   }
 });
 
+// GET /:id/files/zipped — PDFs bundled inside the tender's zip (the real tender
+// documents, as opposed to the loose "tender details" cover page above)
+router.get('/:id/files/zipped', async (req: Request, res: Response) => {
+  try {
+    const tenderName = decodeURIComponent(req.params.id);
+    const entries = await loadZipEntries(tenderName);
+    const files = entries
+      .map(({ name, entry }) => ({ fileName: name, mimeType: inferMimeType(name), fileSize: entry.header.size }))
+      .filter(f => f.mimeType === 'application/pdf');
+    res.json({ files });
+  } catch (error) {
+    logger.error('Error listing zipped tender files:', error);
+    res.status(500).json({ error: 'Failed to list zipped files' });
+  }
+});
+
 // GET /:id/files/download?file=NAME (inline) or ?zip=1 (attachment) — streams from S3 by key; keys and S3 URLs never leave the server
 router.get('/:id/files/download', async (req: Request, res: Response) => {
   try {
@@ -230,6 +264,38 @@ router.post('/:id/files/analyse', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Error analysing tender file:', error);
     res.status(500).json({ error: (error as Error).message || 'Failed to analyse document' });
+  }
+});
+
+// POST /:id/files/build-index — build a Contextual Search chat index for one PDF
+// bundled in the tender's zip. Works before push-to-sales too: reuses (or
+// creates) a Document scoped to the tender name so Contextual Search's corpus
+// picks it up like any other indexed doc.
+router.post('/:id/files/build-index', async (req: Request, res: Response) => {
+  try {
+    const tenderName = decodeURIComponent(req.params.id);
+    const { fileName, provider } = req.body as { fileName?: string; provider?: unknown };
+    if (!fileName) { res.status(400).json({ error: 'fileName is required.' }); return; }
+
+    const match = (await loadZipEntries(tenderName)).find(e => e.name === fileName);
+    if (!match) { res.status(404).json({ error: "File not found in this tender's zip" }); return; }
+    const mimeType = inferMimeType(fileName);
+    if (mimeType !== 'application/pdf') { res.status(400).json({ error: 'Only PDF files can be indexed.' }); return; }
+
+    const lead = await TenderLead.findOne({ tenderName }).lean();
+    const inquiryId = lead?.pushedInquiryId ?? tenderName;
+
+    let doc = await Doc.findOne({ inquiryId, fileName });
+    if (!doc) {
+      doc = await saveInquiryDoc(inquiryId, fileName, match.entry.getData(), mimeType);
+    }
+
+    const result = await runIndexBuild(doc, parseProvider(provider));
+    res.json(result);
+  } catch (error) {
+    logger.error('Error building tender file index:', error);
+    const status = (error as { status?: number })?.status;
+    res.status(status === 409 || status === 400 ? status : 500).json({ error: (error as Error).message || 'Failed to build index' });
   }
 });
 

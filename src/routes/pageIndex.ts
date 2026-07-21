@@ -63,28 +63,31 @@ router.get('/:docId', async (req: Request, res: Response) => {
   }
 });
 
-// ─── POST /api/pageindex/:docId/build ─────────────────────────────────────────
+// Shared by the per-document build route below and the Lead Engine's
+// build-a-tender-file-index route (scrapedTenders.ts) — same pipeline either way,
+// the only difference is which Document row it's building against.
+export async function runIndexBuild(
+  doc: InstanceType<typeof Doc>,
+  provider: LlmProvider,
+): Promise<ReturnType<typeof formatTree>> {
+  if (!doc.s3Key) throw Object.assign(new Error('No file uploaded for this document.'), { status: 400 });
 
-router.post('/:docId/build', async (req: Request, res: Response) => {
-  try {
-    const provider = parseProvider((req.body as { provider?: unknown })?.provider);
-
-    const doc = await Doc.findById(req.params.docId);
-    if (!doc) { res.status(404).json({ error: 'Document not found.' }); return; }
-    if (!doc.s3Key) { res.status(400).json({ error: 'No file uploaded for this document.' }); return; }
-
-    let work = await PageIndexTree.findOne({ documentId: doc._id });
-    if (work?.status === 'processing') {
-      const age = Date.now() - new Date(work.updatedAt).getTime();
-      if (age < 5 * 60 * 1000) { res.status(409).json({ error: 'Index build already in progress.' }); return; }
+  let work = await PageIndexTree.findOne({ documentId: doc._id });
+  if (work?.status === 'processing') {
+    const age = Date.now() - new Date(work.updatedAt).getTime();
+    if (age < 5 * 60 * 1000) {
+      const err = Object.assign(new Error('Index build already in progress.'), { status: 409 });
+      throw err;
     }
+  }
 
-    if (!work) work = new PageIndexTree({ documentId: doc._id, inquiryId: doc.inquiryId });
-    work.status   = 'processing';
-    work.error    = '';
-    work.provider = provider;
-    await work.save();
+  if (!work) work = new PageIndexTree({ documentId: doc._id, inquiryId: doc.inquiryId });
+  work.status   = 'processing';
+  work.error    = '';
+  work.provider = provider;
+  await work.save();
 
+  try {
     const buffer    = await downloadFromS3(doc.s3Key);
     const pageTexts = await extractPageTexts(buffer);
     if (pageTexts.length === 0) {
@@ -107,13 +110,30 @@ router.post('/:docId/build', async (req: Request, res: Response) => {
       console.warn(`[pageindex] build for ${doc._id} completed with ${qualityFlags.length} quality flag(s):\n  - ${qualityFlags.join('\n  - ')}`);
     }
 
-    res.json(formatTree(work));
+    return formatTree(work);
+  } catch (err) {
+    work.status = 'failed';
+    work.error  = String(err);
+    await work.save();
+    throw err;
+  }
+}
+
+// ─── POST /api/pageindex/:docId/build ─────────────────────────────────────────
+
+router.post('/:docId/build', async (req: Request, res: Response) => {
+  try {
+    const provider = parseProvider((req.body as { provider?: unknown })?.provider);
+
+    const doc = await Doc.findById(req.params.docId);
+    if (!doc) { res.status(404).json({ error: 'Document not found.' }); return; }
+
+    const result = await runIndexBuild(doc, provider);
+    res.json(result);
   } catch (err) {
     logger.error('[pageindex] build error:', err);
-    try {
-      const work = await PageIndexTree.findOne({ documentId: req.params.docId });
-      if (work) { work.status = 'failed'; work.error = String(err); await work.save(); }
-    } catch { /* ignore */ }
+    const status = (err as { status?: number })?.status;
+    if (status === 409 || status === 400) { res.status(status).json({ error: (err as Error).message }); return; }
     res.status(500).json({ error: 'Index build failed.', details: String(err) });
   }
 });

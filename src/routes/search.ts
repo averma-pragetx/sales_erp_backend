@@ -49,11 +49,12 @@ router.get('/corpus', async (_req: Request, res: Response) => {
     const trees = await PageIndexTree.find({ status: 'done' })
       .select('documentId inquiryId pageCount builtAt').lean();
     const docs = await Doc.find({ _id: { $in: trees.map(t => t.documentId) } })
-      .select('title inquiryId').lean();
+      .select('title fileName inquiryId').lean();
     const docById = new Map(docs.map(d => [String(d._id), d]));
     res.json(trees.map(t => ({
       docId:     String(t.documentId),
       title:     docById.get(String(t.documentId))?.title ?? 'Untitled document',
+      fileName:  docById.get(String(t.documentId))?.fileName ?? '',
       inquiryId: t.inquiryId,
       pageCount: t.pageCount,
       builtAt:   t.builtAt,
